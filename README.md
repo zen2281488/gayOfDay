@@ -51,7 +51,7 @@ docker compose logs -f
 Переменные окружения (`.env` или docker-compose):
 
 - `VK_TOKEN` — токен сообщества VK с доступом к сообщениям
-- `GROQ_API_KEY` — API ключ Groq
+- `GROQ_API_KEY` — API ключ Groq (получить: https://console.groq.com/keys)
 - `GROQ_MODEL` — ID модели (по умолчанию берется из кода, можно переопределить)
 - `GROQ_TEMPERATURE` — температура генерации, например `0.7`
 - `DB_PATH` — путь к SQLite (в Docker по умолчанию `/app/data/chat_history.db`)
