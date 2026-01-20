@@ -45,6 +45,22 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
+## Быстрый старт (Linux, одной командой)
+
+Замените `VK_TOKEN_VALUE`, `GROQ_API_KEY_VALUE` и при необходимости модель:
+
+```bash
+sudo apt-get update && sudo apt-get install -y git docker.io docker-compose-plugin && sudo systemctl enable --now docker && git clone https://github.com/zen2281488/gayOfDay.git && cd gayOfDay && printf "VK_TOKEN=VK_TOKEN_VALUE\nGROQ_API_KEY=GROQ_API_KEY_VALUE\nGROQ_MODEL=llama-3.1-8b-instant\nGROQ_TEMPERATURE=0.9\n" > .env && docker compose up -d --build
+```
+
+## Быстрый старт (Windows, одной командой)
+
+Замените `VK_TOKEN_VALUE`, `GROQ_API_KEY_VALUE` и при необходимости модель:
+
+```powershell
+winget install -e --id Git.Git; winget install -e --id Docker.DockerDesktop; git clone https://github.com/zen2281488/gayOfDay.git; cd gayOfDay; @\"VK_TOKEN=VK_TOKEN_VALUE`nGROQ_API_KEY=GROQ_API_KEY_VALUE`nGROQ_MODEL=llama-3.1-8b-instant`nGROQ_TEMPERATURE=0.9`n\"@ | Set-Content -Encoding ASCII .env; docker compose up -d --build
+```
+
 <a id="configuration"></a>
 ## Настройка
 
