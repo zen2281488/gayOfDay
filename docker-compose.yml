@@ -1,0 +1,15 @@
+services:
+  vk-bot:
+    build: .
+    container_name: gay_of_the_day_bot
+    restart: unless-stopped
+    # Загружаем секреты из файла .env
+    env_file:
+      - .env
+    environment:
+      # Установи часовой пояс, чтобы игра сбрасывалась в полночь по твоему времени
+      - TZ=Europe/Moscow
+      - DB_PATH=/app/data/chat_history.db
+    volumes:
+      # Пробрасываем файл базы данных наружу, чтобы не терять историю при редеплое
+      - ./data:/app/data
