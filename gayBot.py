@@ -41,8 +41,12 @@ CMD_SET_MODEL = "/установить_модель"
 CMD_SET_KEY = "/установить_ключ"
 CMD_SET_TEMPERATURE = "/установить_температуру"
 CMD_LIST_MODELS = "/список_моделей"
+CMD_LEADERBOARD = "/лидерборд"
+CMD_LEADERBOARD_TIMER_SET = "/таймер_лидерборда"
+CMD_LEADERBOARD_TIMER_RESET = "/сброс_таймера_лидерборда"
 
 DB_NAME = os.getenv("DB_PATH", "chat_history.db")
+MSK_TZ = datetime.timezone(datetime.timedelta(hours=3))
 
 # 🔥 КЛАСС ПРАВИЛА (Чтобы работало startswith) 🔥
 class StartswithRule(ABCRule[Message]):
@@ -80,6 +84,7 @@ async def init_db():
         await db.execute("CREATE TABLE IF NOT EXISTS messages (user_id INTEGER, peer_id INTEGER, text TEXT, timestamp INTEGER, username TEXT)")
         await db.execute("CREATE TABLE IF NOT EXISTS daily_game (peer_id INTEGER, date TEXT, winner_id INTEGER, reason TEXT, PRIMARY KEY (peer_id, date))")
         await db.execute("CREATE TABLE IF NOT EXISTS last_winner (peer_id INTEGER PRIMARY KEY, winner_id INTEGER, timestamp INTEGER)")
+        await db.execute("CREATE TABLE IF NOT EXISTS leaderboard_schedule (peer_id INTEGER PRIMARY KEY, day INTEGER, time TEXT, last_run_month TEXT)")
         await db.execute("CREATE TABLE IF NOT EXISTS schedules (peer_id INTEGER PRIMARY KEY, time TEXT)")
         await db.commit()
 
@@ -173,7 +178,7 @@ async def run_game_logic(peer_id: int, reset_if_exists: bool = False):
     reset_if_exists=True: Если игра запускается таймером, мы удаляем старый результат и выбираем заново.
     reset_if_exists=False: (По умолчанию) Если играем вручную, бот скажет 'Уже выбрали'.
     """
-    today = datetime.date.today().isoformat()
+    today = datetime.datetime.now(MSK_TZ).date().isoformat()
     last_winner_id = None
     exclude_user_id = None
     
@@ -269,7 +274,7 @@ async def run_game_logic(peer_id: int, reset_if_exists: bool = False):
         )
         await db.execute(
             "INSERT OR REPLACE INTO last_winner (peer_id, winner_id, timestamp) VALUES (?, ?, ?)",
-            (peer_id, winner_id, int(datetime.datetime.now().timestamp()))
+            (peer_id, winner_id, int(datetime.datetime.now(MSK_TZ).timestamp()))
         )
         await db.commit()
 
@@ -279,11 +284,99 @@ async def run_game_logic(peer_id: int, reset_if_exists: bool = False):
         f"💬 Вердикт:\n{reason}"
     )
 # ================= ПЛАНИРОВЩИК =================
+# ================= Лидерборд: утилиты =================
+def last_day_of_month(year: int, month: int) -> int:
+    if month == 12:
+        next_month = datetime.date(year + 1, 1, 1)
+    else:
+        next_month = datetime.date(year, month + 1, 1)
+    return (next_month - datetime.timedelta(days=1)).day
+
+async def build_leaderboard_text(peer_id: int) -> str:
+    today = datetime.datetime.now(MSK_TZ).date()
+    month_start = today.replace(day=1)
+    if today.month == 12:
+        next_month = datetime.date(today.year + 1, 1, 1)
+    else:
+        next_month = datetime.date(today.year, today.month + 1, 1)
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            """
+            SELECT winner_id, COUNT(*) as wins
+            FROM daily_game
+            WHERE peer_id = ? AND date >= ? AND date < ?
+            GROUP BY winner_id
+            ORDER BY wins DESC, winner_id ASC
+            """,
+            (peer_id, month_start.isoformat(), next_month.isoformat())
+        )
+        month_rows = await cursor.fetchall()
+
+        cursor = await db.execute(
+            """
+            SELECT winner_id, COUNT(*) as wins
+            FROM daily_game
+            WHERE peer_id = ?
+            GROUP BY winner_id
+            ORDER BY wins DESC, winner_id ASC
+            """,
+            (peer_id,)
+        )
+        all_rows = await cursor.fetchall()
+
+    user_ids = list({uid for uid, _ in (month_rows + all_rows)})
+    name_map = {}
+    if user_ids:
+        try:
+            for i in range(0, len(user_ids), 1000):
+                chunk = user_ids[i:i + 1000]
+                users = await bot.api.users.get(user_ids=chunk)
+                name_map.update({u.id: f"{u.first_name} {u.last_name}" for u in users})
+        except Exception:
+            name_map = {}
+
+    def format_rows(rows):
+        if not rows:
+            return "Нет данных."
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        lines = []
+        for idx, (uid, wins) in enumerate(rows, start=1):
+            name = name_map.get(uid, f"id{uid}")
+            medal = medals.get(idx)
+            prefix = f"{idx}. {medal}" if medal else f"{idx}."
+            lines.append(f"{prefix} [id{uid}|{name}] — ×{wins}")
+        return "\n".join(lines)
+
+    month_label = today.strftime("%m.%Y")
+    return (
+        f"📊 Лидерборд {GAME_TITLE}\n\n"
+        f"🗓 За {month_label}:\n{format_rows(month_rows)}\n\n"
+        f"🏆 За все время:\n{format_rows(all_rows)}"
+    )
+
+async def post_leaderboard(peer_id: int, month_key: str):
+    try:
+        text = await build_leaderboard_text(peer_id)
+        await bot.api.messages.send(peer_id=peer_id, message=text, random_id=0)
+    except Exception as e:
+        print(f"ERROR sending leaderboard to {peer_id}: {e}")
+        return
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "UPDATE leaderboard_schedule SET last_run_month = ? WHERE peer_id = ?",
+            (month_key, peer_id)
+        )
+        await db.commit()
+
 async def scheduler_loop():
     print("⏰ Scheduler started...")
     while True:
         try:
-            now_time = datetime.datetime.now().strftime("%H:%M")
+            now = datetime.datetime.now(MSK_TZ)
+            now_time = now.strftime("%H:%M")
+            month_key = now.strftime("%Y-%m")
+            last_day = last_day_of_month(now.year, now.month)
             async with aiosqlite.connect(DB_NAME) as db:
                 cursor = await db.execute("SELECT peer_id FROM schedules WHERE time = ?", (now_time,))
                 rows = await cursor.fetchall()
@@ -291,6 +384,23 @@ async def scheduler_loop():
                     print(f"⏰ Triggering scheduled games for time {now_time}: {len(rows)} chats")
                     for (peer_id,) in rows:
                         asyncio.create_task(run_game_logic(peer_id))
+                cursor = await db.execute(
+                    "SELECT peer_id, day, time, last_run_month FROM leaderboard_schedule WHERE time = ?",
+                    (now_time,)
+                )
+                lb_rows = await cursor.fetchall()
+                if lb_rows:
+                    for peer_id, day, _, last_run_month in lb_rows:
+                        try:
+                            day_int = int(day)
+                        except (TypeError, ValueError):
+                            continue
+                        effective_day = min(day_int, last_day)
+                        if now.day != effective_day:
+                            continue
+                        if last_run_month == month_key:
+                            continue
+                        asyncio.create_task(post_leaderboard(peer_id, month_key))
             await asyncio.sleep(60)
         except Exception as e:
             print(f"ERROR in scheduler: {e}")
@@ -300,34 +410,50 @@ async def scheduler_loop():
 
 @bot.on.message(text=CMD_SETTINGS)
 async def show_settings(message: Message):
-    key_short = GROQ_API_KEY[:5] + "..." if GROQ_API_KEY else "Нет"
+    key_short = GROQ_API_KEY[:5] + "..." if GROQ_API_KEY else "???"
     schedule_time = None
+    leaderboard_day = None
+    leaderboard_time = None
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute("SELECT time FROM schedules WHERE peer_id = ?", (message.peer_id,))
         row = await cursor.fetchone()
         if row:
             schedule_time = row[0]
-    schedule_line = f"Таймер: `{schedule_time}`\n" if schedule_time else ""
+        cursor = await db.execute("SELECT day, time FROM leaderboard_schedule WHERE peer_id = ?", (message.peer_id,))
+        row = await cursor.fetchone()
+        if row:
+            leaderboard_day, leaderboard_time = row
+    if schedule_time:
+        schedule_line = f"Таймер (МСК): `{schedule_time}`\n"
+    else:
+        schedule_line = "Таймер (МСК): не установлен\n"
+    if leaderboard_day is not None and leaderboard_time:
+        leaderboard_line = f"Лидерборд (МСК): `{int(leaderboard_day):02d}-{leaderboard_time.replace(':','-')}`\n"
+    else:
+        leaderboard_line = "Лидерборд (МСК): не установлен\n"
     text = (
-        f"⚙️ **НАСТРОЙКИ БОТА**\n\n"
-        f"🧠 **Модель:** `{GROQ_MODEL}`\n"
+        f"🎛 **Настройки игры**\n\n"
+        f"🎯 **Модель:** `{GROQ_MODEL}`\n"
         f"🔑 **Ключ:** `{key_short}`\n"
         f"🌡 **Температура:** `{GROQ_TEMPERATURE}`\n"
         f"Build: `{BUILD_DATE}`\n"
         f"{schedule_line}\n"
-        f"**🛠 Админка:**\n"
-        f"• `{CMD_SET_MODEL} <id>` — Сменить модель\n"
-        f"• `{CMD_SET_KEY} <ключ>` — Новый API ключ\n"
-        f"• `{CMD_SET_TEMPERATURE} <0.0-2.0>` - установить температуру\n"
-        f"• `{CMD_LIST_MODELS}` — Список моделей (Live)\n\n"
+        f"{leaderboard_line}\n"
+        f"**⚙ Команды:**\n"
+        f"• `{CMD_SET_MODEL} <id>` - Сменить модель\n"
+        f"• `{CMD_SET_KEY} <ключ>` - Новый API ключ\n"
+        f"• `{CMD_SET_TEMPERATURE} <0.0-2.0>` - Установить температуру\n"
+        f"• `{CMD_LIST_MODELS}` - Список моделей (Live)\n\n"
         f"**🎮 Игра:**\n"
-        f"• `{CMD_RUN}` — Найти пидора дня\n"
-        f"• `{CMD_RESET}` — Сброс результата сегодня\n"
-        f"• `{CMD_TIME_SET} 14:00` — Установить авто-поиск\n"
-        f"• `{CMD_TIME_RESET}` — Удалить таймер"
+        f"• `{CMD_RUN}` - Найти пидора дня\n"
+        f"• `{CMD_RESET}` - Сброс результата сегодня\n"
+        f"• `{CMD_LEADERBOARD}` - Лидерборд месяца и все время\n"
+        f"• `{CMD_TIME_SET} 14:00` - Установить авто-поиск (МСК)\n"
+        f"• `{CMD_TIME_RESET}` - Удалить таймер\n"
+        f"• `{CMD_LEADERBOARD_TIMER_SET} 05-18-30` - Таймер лидерборда (МСК)\n"
+        f"• `{CMD_LEADERBOARD_TIMER_RESET}` - Сброс таймера лидерборда"
     )
     await message.answer(text)
-
 @bot.on.message(text=CMD_LIST_MODELS)
 async def list_models_handler(message: Message):
     msg = await message.answer(f"🔄 Связываюсь с API Groq...")
@@ -353,6 +479,11 @@ async def list_models_handler(message: Message):
         await message.answer(f"❌ Ошибка API:\n{e}")
 
 # ОБРАБОТЧИКИ С НОВЫМ ПРАВИЛОМ
+@bot.on.message(text=CMD_LEADERBOARD)
+async def leaderboard_handler(message: Message):
+    text = await build_leaderboard_text(message.peer_id)
+    await message.answer(text)
+
 @bot.on.message(StartswithRule(CMD_SET_MODEL))
 async def set_model_handler(message: Message):
     global GROQ_MODEL
@@ -400,7 +531,7 @@ async def set_temperature_handler(message: Message):
 @bot.on.message(text=CMD_RESET)
 async def reset_daily_game(message: Message):
     peer_id = message.peer_id
-    today = datetime.date.today().isoformat()
+    today = datetime.datetime.now(MSK_TZ).date().isoformat()
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("DELETE FROM daily_game WHERE peer_id = ? AND date = ?", (peer_id, today))
         await db.commit()
@@ -421,9 +552,9 @@ async def set_schedule(message: Message):
                 (message.peer_id, args)
             )
             await db.commit()
-        await message.answer(f"⏰ Таймер установлен! Буду искать жертву в {args}.")
+        await message.answer(f"⏰ Таймер установлен! Буду искать жертву в {args}. (МСК)")
     except ValueError:
-        await message.answer("❌ Неверный формат! Используйте: /время 14:00")
+        await message.answer("❌ Неверный формат! Используйте: /время 14:00 (МСК)")
     except Exception as e:
         await message.answer(f"Ошибка: {e}")
 
@@ -433,6 +564,35 @@ async def unset_schedule(message: Message):
         await db.execute("DELETE FROM schedules WHERE peer_id = ?", (message.peer_id,))
         await db.commit()
     await message.answer("🔕 Таймер удален.")
+
+@bot.on.message(StartswithRule(CMD_LEADERBOARD_TIMER_SET))
+async def set_leaderboard_timer(message: Message):
+    args = message.text.replace(CMD_LEADERBOARD_TIMER_SET, "").strip()
+    match = re.match(r"^(\d{1,2})-(\d{1,2})-(\d{1,2})$", args)
+    if not match:
+        await message.answer(f"❌ Неверный формат! Используйте: `{CMD_LEADERBOARD_TIMER_SET} 05-18-30` (МСК)")
+        return
+    day = int(match.group(1))
+    hour = int(match.group(2))
+    minute = int(match.group(3))
+    if day < 1 or day > 31 or hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        await message.answer("❌ Неверные значения. Формат: ДД-ЧЧ-ММ (МСК)")
+        return
+    time_str = f"{hour:02d}:{minute:02d}"
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO leaderboard_schedule (peer_id, day, time, last_run_month) VALUES (?, ?, ?, NULL)",
+            (message.peer_id, day, time_str)
+        )
+        await db.commit()
+    await message.answer(f"✅ Таймер лидерборда установлен: `{day:02d}-{hour:02d}-{minute:02d}` (МСК)")
+
+@bot.on.message(text=CMD_LEADERBOARD_TIMER_RESET)
+async def reset_leaderboard_timer(message: Message):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("DELETE FROM leaderboard_schedule WHERE peer_id = ?", (message.peer_id,))
+        await db.commit()
+    await message.answer("✅ Таймер лидерборда сброшен.")
 
 @bot.on.message()
 async def logger(message: Message):
