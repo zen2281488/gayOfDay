@@ -300,12 +300,20 @@ async def scheduler_loop():
 @bot.on.message(text=CMD_SETTINGS)
 async def show_settings(message: Message):
     key_short = GROQ_API_KEY[:5] + "..." if GROQ_API_KEY else "Нет"
+    schedule_time = None
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute("SELECT time FROM schedules WHERE peer_id = ?", (message.peer_id,))
+        row = await cursor.fetchone()
+        if row:
+            schedule_time = row[0]
+    schedule_line = f"Таймер: `{schedule_time}`\n" if schedule_time else ""
     text = (
         f"⚙️ **НАСТРОЙКИ БОТА**\n\n"
         f"🧠 **Модель:** `{GROQ_MODEL}`\n"
         f"🔑 **Ключ:** `{key_short}`\n"
         f"🌡 **Температура:** `{GROQ_TEMPERATURE}`\n"
-        f"Build: `{BUILD_DATE}`\n\n"
+        f"Build: `{BUILD_DATE}`\n"
+        f"{schedule_line}\n"
         f"**🛠 Админка:**\n"
         f"• `{CMD_SET_MODEL} <id>` — Сменить модель\n"
         f"• `{CMD_SET_KEY} <ключ>` — Новый API ключ\n"
