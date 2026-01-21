@@ -1,4 +1,4 @@
-﻿import os
+﻿﻿import os
 import sys
 import json
 import random
@@ -350,7 +350,7 @@ async def build_leaderboard_text(peer_id: int) -> str:
 
     month_label = today.strftime("%m.%Y")
     return (
-        f"📊 Лидерборд {GAME_TITLE}\n\n"
+        f"📊 Пидерборд\n\n"
         f"🗓 За {month_label}:\n{format_rows(month_rows)}\n\n"
         f"🏆 За все время:\n{format_rows(all_rows)}"
     )
