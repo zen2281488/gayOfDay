@@ -1,4 +1,4 @@
-﻿<!-- Banner -->
+<!-- Banner -->
 <p align="center">
   <img src="https://capsule-render.vercel.app/api?type=rect&color=0:0f2027,100:203a43&height=120&section=header&text=Gay%20Of%20Day%20VK%20Bot&fontSize=40&fontColor=ffffff" alt="Gay Of Day VK Bot" />
 </p>
@@ -47,18 +47,18 @@ docker compose logs -f
 
 ## Быстрый старт (Linux, одной командой)
 
-Замените `VK_TOKEN_VALUE`, `GROQ_API_KEY_VALUE` и при необходимости модель:
+Замените `VK_TOKEN_VALUE`, `GROQ_API_KEY_VALUE`, при необходимости модель и настройки промпта:
 
 ```bash
-sudo apt-get update && sudo apt-get install -y git docker.io docker-compose-plugin && sudo systemctl enable --now docker && git clone https://github.com/zen2281488/gayOfDay.git && cd gayOfDay && printf "VK_TOKEN=VK_TOKEN_VALUE\nGROQ_API_KEY=GROQ_API_KEY_VALUE\nGROQ_MODEL=llama-3.1-8b-instant\nGROQ_TEMPERATURE=0.9\n" > .env && docker compose up -d --build
+sudo apt-get update && sudo apt-get install -y git docker.io docker-compose-plugin && sudo systemctl enable --now docker && git clone https://github.com/zen2281488/gayOfDay.git && cd gayOfDay && printf 'VK_TOKEN=VK_TOKEN_VALUE\nGROQ_API_KEY=GROQ_API_KEY_VALUE\nGROQ_MODEL=llama-3.1-8b-instant\nGROQ_TEMPERATURE=0.9\nGAME_TITLE={{GAME_TITLE}} дня\nLEADERBOARD_TITLE=📊 Пидерборд\nUSER_PROMPT_TEMPLATE=Лог чата:\\n{{CHAT_LOG}}\\n\\nКто из них {{GAME_TITLE}}? Ответ — строго JSON.\n' > .env && docker compose up -d --build
 ```
 
 ## Быстрый старт (Windows, одной командой)
 
-Замените `VK_TOKEN_VALUE`, `GROQ_API_KEY_VALUE` и при необходимости модель:
+Замените `VK_TOKEN_VALUE`, `GROQ_API_KEY_VALUE`, при необходимости модель и настройки промпта:
 
 ```powershell
-winget install -e --id Git.Git; winget install -e --id Docker.DockerDesktop; git clone https://github.com/zen2281488/gayOfDay.git; cd gayOfDay; @\"VK_TOKEN=VK_TOKEN_VALUE`nGROQ_API_KEY=GROQ_API_KEY_VALUE`nGROQ_MODEL=llama-3.1-8b-instant`nGROQ_TEMPERATURE=0.9`n\"@ | Set-Content -Encoding ASCII .env; docker compose up -d --build
+winget install -e --id Git.Git; winget install -e --id Docker.DockerDesktop; git clone https://github.com/zen2281488/gayOfDay.git; cd gayOfDay; @\"VK_TOKEN=VK_TOKEN_VALUE`nGROQ_API_KEY=GROQ_API_KEY_VALUE`nGROQ_MODEL=llama-3.1-8b-instant`nGROQ_TEMPERATURE=0.9`nGAME_TITLE={{GAME_TITLE}} дня`nLEADERBOARD_TITLE=📊 Пидерборд`nUSER_PROMPT_TEMPLATE=Лог чата:\n{{CHAT_LOG}}\n\nКто из них {{GAME_TITLE}}? Ответ — строго JSON.`n\"@ | Set-Content -Encoding UTF8 .env; docker compose up -d --build
 ```
 
 <a id="configuration"></a>
@@ -70,7 +70,12 @@ winget install -e --id Git.Git; winget install -e --id Docker.DockerDesktop; git
 - `GROQ_API_KEY` — API ключ Groq (получить: https://console.groq.com/keys)
 - `GROQ_MODEL` — ID модели (по умолчанию берется из кода, можно переопределить)
 - `GROQ_TEMPERATURE` — температура генерации, например `0.7`
+- `GAME_TITLE` — название игры в ответах (например, `{{GAME_TITLE}} дня`)
+- `LEADERBOARD_TITLE` — заголовок таблицы лидеров
+- `USER_PROMPT_TEMPLATE` — шаблон пользовательского промпта (подставляются `{{CHAT_LOG}}` и `{{GAME_TITLE}}`, переносы строк — через `\n`)
 - `DB_PATH` — путь к SQLite (в Docker по умолчанию `/app/data/chat_history.db`)
+
+Системный промпт зашит в коде и не задается через `.env`.
 
 Пример `.env`:
 
@@ -79,6 +84,10 @@ VK_TOKEN=vk1.a.***
 GROQ_API_KEY=gsk_***
 GROQ_MODEL=llama-3.1-8b-instant
 GROQ_TEMPERATURE=0.9
+GAME_TITLE=Самый модный парень на деревне
+LEADERBOARD_TITLE=📊 Лидерборд
+USER_PROMPT_TEMPLATE=Лог чата:\n{{CHAT_LOG}}\n\nКто из них {{GAME_TITLE}}? Выбери user_id и придумай причину, опираясь на стиль, уверенность и то, как человек подает себя. Обращайся к человеку по имени, а не по id. Используй цитаты из лога для обоснования. Вердикт — 4-6 предложений, с легкой иронией. Ответ — строго JSON.
+
 ```
 
 <a id="commands"></a>
