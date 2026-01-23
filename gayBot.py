@@ -381,6 +381,8 @@ def is_message_allowed(message: Message) -> bool:
     return False
 
 def get_reply_to_id(message: Message):
+    if getattr(message, "is_unavailable", False):
+        return None
     reply_to = getattr(message, "conversation_message_id", None)
     if isinstance(reply_to, int) and reply_to > 0:
         return reply_to
@@ -390,7 +392,19 @@ async def send_reply(message: Message, text: str, **kwargs):
     reply_to = get_reply_to_id(message)
     if reply_to:
         kwargs.setdefault("reply_to", reply_to)
-    await message.answer(text, **kwargs)
+    try:
+        await message.answer(text, **kwargs)
+    except Exception as e:
+        error_text = str(e).lower()
+        if reply_to and ("reply_to" in error_text or "forwarded message not found" in error_text):
+            try:
+                kwargs.pop("reply_to", None)
+                await message.answer(text, **kwargs)
+                return
+            except Exception as inner:
+                print(f"ERROR: send_reply fallback failed: {inner}")
+                return
+        print(f"ERROR: send_reply failed: {e}")
 
 
 bot = Bot(token=VK_TOKEN)
