@@ -31,8 +31,23 @@ def read_int_env(name: str):
         print(f"WARNING: {name} is not a valid integer")
         return None
 
+def read_int_list_env(name: str):
+    value = os.getenv(name)
+    if not value:
+        return []
+    parts = [part.strip() for part in value.split(",") if part.strip()]
+    result = []
+    for part in parts:
+        try:
+            result.append(int(part))
+        except ValueError:
+            print(f"WARNING: {name} has invalid integer: {part}")
+    return result
+
 ADMIN_USER_ID = read_int_env("ADMIN_USER_ID")
-ALLOWED_PEER_ID = read_int_env("ALLOWED_PEER_ID")
+ALLOWED_PEER_IDS = read_int_list_env("ALLOWED_PEER_ID")
+if not ALLOWED_PEER_IDS:
+    ALLOWED_PEER_IDS = None
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
@@ -206,9 +221,9 @@ def extract_group_id(group_response):
     return None
 
 def is_message_allowed(message: Message) -> bool:
-    if ALLOWED_PEER_ID is None:
+    if ALLOWED_PEER_IDS is None:
         return True
-    if message.peer_id == ALLOWED_PEER_ID:
+    if message.peer_id in ALLOWED_PEER_IDS:
         return True
     if ADMIN_USER_ID and message.from_id == ADMIN_USER_ID and message.peer_id == message.from_id:
         return True
@@ -393,7 +408,7 @@ async def run_game_logic(peer_id: int, reset_if_exists: bool = False):
     reset_if_exists=True: Если игра запускается таймером, мы удаляем старый результат и выбираем заново.
     reset_if_exists=False: (По умолчанию) Если играем вручную, бот скажет 'Уже выбрали'.
     """
-    if ALLOWED_PEER_ID is not None and peer_id != ALLOWED_PEER_ID:
+    if ALLOWED_PEER_IDS is not None and peer_id not in ALLOWED_PEER_IDS:
         return
     today = datetime.datetime.now(MSK_TZ).date().isoformat()
     last_winner_id = None
@@ -594,7 +609,7 @@ async def build_leaderboard_text(peer_id: int) -> str:
     )
 
 async def post_leaderboard(peer_id: int, month_key: str):
-    if ALLOWED_PEER_ID is not None and peer_id != ALLOWED_PEER_ID:
+    if ALLOWED_PEER_IDS is not None and peer_id not in ALLOWED_PEER_IDS:
         return
     try:
         text = await build_leaderboard_text(peer_id)
@@ -618,10 +633,11 @@ async def scheduler_loop():
             month_key = now.strftime("%Y-%m")
             last_day = last_day_of_month(now.year, now.month)
             async with aiosqlite.connect(DB_NAME) as db:
-                if ALLOWED_PEER_ID is not None:
+                if ALLOWED_PEER_IDS is not None:
+                    placeholders = ", ".join(["?"] * len(ALLOWED_PEER_IDS))
                     cursor = await db.execute(
-                        "SELECT peer_id FROM schedules WHERE time = ? AND peer_id = ?",
-                        (now_time, ALLOWED_PEER_ID)
+                        f"SELECT peer_id FROM schedules WHERE time = ? AND peer_id IN ({placeholders})",
+                        (now_time, *ALLOWED_PEER_IDS)
                     )
                 else:
                     cursor = await db.execute("SELECT peer_id FROM schedules WHERE time = ?", (now_time,))
@@ -630,10 +646,11 @@ async def scheduler_loop():
                     print(f"⏰ Triggering scheduled games for time {now_time}: {len(rows)} chats")
                     for (peer_id,) in rows:
                         asyncio.create_task(run_game_logic(peer_id))
-                if ALLOWED_PEER_ID is not None:
+                if ALLOWED_PEER_IDS is not None:
+                    placeholders = ", ".join(["?"] * len(ALLOWED_PEER_IDS))
                     cursor = await db.execute(
-                        "SELECT peer_id, day, time, last_run_month FROM leaderboard_schedule WHERE time = ? AND peer_id = ?",
-                        (now_time, ALLOWED_PEER_ID)
+                        f"SELECT peer_id, day, time, last_run_month FROM leaderboard_schedule WHERE time = ? AND peer_id IN ({placeholders})",
+                        (now_time, *ALLOWED_PEER_IDS)
                     )
                 else:
                     cursor = await db.execute(
@@ -673,13 +690,17 @@ async def show_settings(message: Message):
         key_short = VENICE_API_KEY[:5] + "..." if VENICE_API_KEY else "???"
         active_model = VENICE_MODEL
         active_temperature = VENICE_TEMPERATURE
-    if ALLOWED_PEER_ID is None:
+    if ALLOWED_PEER_IDS is None:
         access_line = "без ограничений"
     else:
-        if ADMIN_USER_ID:
-            access_line = f"чат {ALLOWED_PEER_ID}, ЛС admin {ADMIN_USER_ID}"
+        if len(ALLOWED_PEER_IDS) == 1:
+            peers_label = f"чат {ALLOWED_PEER_IDS[0]}"
         else:
-            access_line = f"чат {ALLOWED_PEER_ID}, ЛС admin не настроены"
+            peers_label = "чаты " + ", ".join(str(pid) for pid in ALLOWED_PEER_IDS)
+        if ADMIN_USER_ID:
+            access_line = f"{peers_label}, ЛС admin {ADMIN_USER_ID}"
+        else:
+            access_line = f"{peers_label}, ЛС admin не настроены"
     schedule_time = None
     leaderboard_day = None
     leaderboard_time = None
