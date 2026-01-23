@@ -9,7 +9,7 @@ import traceback
 import re
 from collections import Counter
 from vkbottle.bot import Bot, Message
-from vkbottle.dispatch.rules import ABCRule # Для создания своего правила
+from vkbottle.dispatch.rules import ABCRule # ??? ???????? ?????? ???????
 import logging
 import httpx
 try:
@@ -17,7 +17,7 @@ try:
 except ImportError:
     AsyncGroq = None
 
-# ================= НАСТРОЙКИ =================
+# ================= ????????? =================
 VK_TOKEN = os.getenv("VK_TOKEN")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "").strip().lower()
 
@@ -49,6 +49,12 @@ ALLOWED_PEER_IDS = read_int_list_env("ALLOWED_PEER_ID")
 if not ALLOWED_PEER_IDS:
     ALLOWED_PEER_IDS = None
 
+CHATBOT_ENABLED = os.getenv("CHATBOT_ENABLED", "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 CHAT_HISTORY_LIMIT = read_int_env("CHAT_HISTORY_LIMIT")
 if CHAT_HISTORY_LIMIT is None:
     CHAT_HISTORY_LIMIT = 6
@@ -60,6 +66,24 @@ if CHAT_MESSAGE_MAX_CHARS is None:
     CHAT_MESSAGE_MAX_CHARS = 300
 if CHAT_MESSAGE_MAX_CHARS < 0:
     CHAT_MESSAGE_MAX_CHARS = 0
+
+LLM_MAX_TOKENS = read_int_env("LLM_MAX_TOKENS")
+if LLM_MAX_TOKENS is None:
+    LLM_MAX_TOKENS = 800
+if LLM_MAX_TOKENS < 1:
+    LLM_MAX_TOKENS = 1
+
+CHAT_MAX_TOKENS = read_int_env("CHAT_MAX_TOKENS")
+if CHAT_MAX_TOKENS is None:
+    CHAT_MAX_TOKENS = 300
+if CHAT_MAX_TOKENS < 1:
+    CHAT_MAX_TOKENS = 1
+
+CHAT_RESPONSE_MAX_CHARS = read_int_env("CHAT_RESPONSE_MAX_CHARS")
+if CHAT_RESPONSE_MAX_CHARS is None:
+    CHAT_RESPONSE_MAX_CHARS = 600
+if CHAT_RESPONSE_MAX_CHARS < 0:
+    CHAT_RESPONSE_MAX_CHARS = 0
 
 BOT_REPLY_FULL_LIMIT = read_int_env("CHAT_BOT_FULL_LIMIT")
 if BOT_REPLY_FULL_LIMIT is None:
@@ -125,48 +149,48 @@ BUILD_SHA = os.getenv("BUILD_SHA", "")
 BOT_GROUP_ID = None
 
 if not VK_TOKEN:
-    print("❌ ОШИБКА: Не найден VK_TOKEN!")
+    print("? ??????: ?? ?????? VK_TOKEN!")
     sys.exit(1)
 
 if LLM_PROVIDER not in ("groq", "venice"):
-    print("❌ ОШИБКА: LLM_PROVIDER должен быть groq или venice!")
+    print("? ??????: LLM_PROVIDER ?????? ???? groq ??? venice!")
     sys.exit(1)
 
 if LLM_PROVIDER == "groq":
     if not GROQ_API_KEY:
-        print("❌ ОШИБКА: Не найден GROQ_API_KEY при выбранном провайдере groq!")
+        print("? ??????: ?? ?????? GROQ_API_KEY ??? ????????? ?????????? groq!")
         sys.exit(1)
     if AsyncGroq is None:
-        print("❌ ОШИБКА: Пакет groq не установлен, но выбран провайдер groq!")
+        print("? ??????: ????? groq ?? ??????????, ?? ?????? ????????? groq!")
         sys.exit(1)
 else:
     if not VENICE_API_KEY:
-        print("❌ ОШИБКА: Не найден VENICE_API_KEY при выбранном провайдере venice!")
+        print("? ??????: ?? ?????? VENICE_API_KEY ??? ????????? ?????????? venice!")
         sys.exit(1)
 
-# === КОМАНДЫ ===
-GAME_TITLE = os.getenv("GAME_TITLE", "Пидор дня")
-LEADERBOARD_TITLE = os.getenv("LEADERBOARD_TITLE", "📊 Пидерборд")
-CMD_RUN = "/кто"
-CMD_RESET = "/сброс"
-CMD_TIME_SET = "/время"
-CMD_TIME_RESET = "/сброс_времени"
-CMD_SETTINGS = "/настройки"
-CMD_SET_MODEL = "/установить_модель"
-CMD_SET_KEY = "/установить_ключ"
-CMD_SET_TEMPERATURE = "/установить_температуру"
-CMD_SET_PROVIDER = "/провайдер"
-CMD_LIST_MODELS = "/список_моделей"
-CMD_LEADERBOARD = "/лидерборд"
-CMD_LEADERBOARD_TIMER_SET = "/таймер_лидерборда"
-CMD_LEADERBOARD_TIMER_RESET = "/сброс_таймера_лидерборда"
+# === ??????? ===
+GAME_TITLE = os.getenv("GAME_TITLE", "????? ???")
+LEADERBOARD_TITLE = os.getenv("LEADERBOARD_TITLE", "?? ?????????")
+CMD_RUN = "/???"
+CMD_RESET = "/?????"
+CMD_TIME_SET = "/?????"
+CMD_TIME_RESET = "/?????_???????"
+CMD_SETTINGS = "/?????????"
+CMD_SET_MODEL = "/??????????_??????"
+CMD_SET_KEY = "/??????????_????"
+CMD_SET_TEMPERATURE = "/??????????_???????????"
+CMD_SET_PROVIDER = "/?????????"
+CMD_LIST_MODELS = "/??????_???????"
+CMD_LEADERBOARD = "/?????????"
+CMD_LEADERBOARD_TIMER_SET = "/??????_??????????"
+CMD_LEADERBOARD_TIMER_RESET = "/?????_???????_??????????"
 
 DB_NAME = os.getenv("DB_PATH", "chat_history.db")
 MSK_TZ = datetime.timezone(datetime.timedelta(hours=3))
 
 def format_build_date(value: str) -> str:
     if not value or value == "unknown":
-        return "неизвестно"
+        return "??????????"
     try:
         normalized = value.strip()
         if normalized.endswith("Z"):
@@ -175,11 +199,11 @@ def format_build_date(value: str) -> str:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=datetime.timezone.utc)
         dt = dt.astimezone(MSK_TZ)
-        return dt.strftime("%d.%m.%y в %H:%M")
+        return dt.strftime("%d.%m.%y ? %H:%M")
     except Exception:
         return value
 
-# 🔥 КЛАСС ПРАВИЛА (Чтобы работало startswith) 🔥
+# ?? ????? ??????? (????? ???????? startswith) ??
 class StartswithRule(ABCRule[Message]):
     def __init__(self, prefix: str):
         self.prefix = prefix
@@ -187,21 +211,21 @@ class StartswithRule(ABCRule[Message]):
     async def check(self, event: Message) -> bool:
         return event.text.startswith(self.prefix)
 
-# 🔥 ПРОМПТ 🔥
+# ?? ?????? ??
 def normalize_prompt(value: str) -> str:
     if not value:
         return ""
     return value.replace("\\r\\n", "\n").replace("\\n", "\n")
 
 SYSTEM_PROMPT = (
-    "Формат ответа — строго валидный JSON, только объект и только двойные кавычки. "
-    "Пример: {\"user_id\": 123, \"reason\": \"...\"}\n"
-    "Никакого текста вне JSON.\n"
+    "?????? ?????? � ?????? ???????? JSON, ?????? ?????? ? ?????? ??????? ???????. "
+    "??????: {\"user_id\": 123, \"reason\": \"...\"}\n"
+    "???????? ?????? ??? JSON.\n"
 )
 CHAT_SYSTEM_PROMPT = normalize_prompt(
     os.getenv(
         "CHAT_SYSTEM_PROMPT",
-        "Ты чат-бот сообщества VK. Отвечай по-русски, по делу и без JSON."
+        "?? ???-??? ?????????? VK. ??????? ??-??????, ?? ???? ? ??? JSON."
     )
 )
 USER_PROMPT_TEMPLATE = normalize_prompt(os.getenv("USER_PROMPT_TEMPLATE"))
@@ -247,6 +271,13 @@ def trim_text(text: str, max_chars: int) -> str:
 
 def trim_chat_text(text: str) -> str:
     return trim_text(text, CHAT_MESSAGE_MAX_CHARS)
+
+def normalize_max_tokens(value: int, fallback: int) -> int:
+    if value is None:
+        return fallback
+    if value < 1:
+        return 1
+    return value
 
 def extract_reply_text(message: Message) -> str:
     reply_message = getattr(message, "reply_message", None)
@@ -381,7 +412,7 @@ async def venice_request(method: str, path: str, **kwargs) -> httpx.Response:
         raise RuntimeError(f"HTTP {response.status_code}: {message}")
     return response
 
-# ================= БАЗА ДАННЫХ =================
+# ================= ???? ?????? =================
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("CREATE TABLE IF NOT EXISTS messages (user_id INTEGER, peer_id INTEGER, text TEXT, timestamp INTEGER, username TEXT)")
@@ -393,15 +424,16 @@ async def init_db():
         await db.execute("CREATE TABLE IF NOT EXISTS schedules (peer_id INTEGER PRIMARY KEY, time TEXT)")
         await db.commit()
 
-# ================= LLM ЛОГИКА =================
-async def fetch_llm_messages(messages: list) -> str:
+# ================= LLM ?????? =================
+async def fetch_llm_messages(messages: list, max_tokens: int = None) -> str:
+    max_tokens = normalize_max_tokens(max_tokens, LLM_MAX_TOKENS)
     if LLM_PROVIDER == "venice":
         print(f"DEBUG: Sending request to Venice. Model: {VENICE_MODEL}, Temp: {VENICE_TEMPERATURE}")
         payload = {
             "model": VENICE_MODEL,
             "messages": messages,
             "temperature": VENICE_TEMPERATURE,
-            "max_tokens": 800,
+            "max_tokens": max_tokens,
             "venice_parameters": {
                 "include_venice_system_prompt": VENICE_INCLUDE_SYSTEM_PROMPT,
             },
@@ -424,7 +456,7 @@ async def fetch_llm_messages(messages: list) -> str:
         model=GROQ_MODEL,
         messages=messages,
         temperature=GROQ_TEMPERATURE,
-        max_tokens=800,
+        max_tokens=max_tokens,
     )
     content = completion.choices[0].message.content
     if not content:
@@ -470,7 +502,7 @@ async def choose_winner_via_llm(chat_log: list, excluded_user_id=None) -> dict:
         available_ids.add(uid)
 
     if not context_lines:
-        return {"user_id": 0, "reason": "Все молчат. Скучные натуралы."}
+        return {"user_id": 0, "reason": "??? ??????. ??????? ????????."}
 
     alias_parts = [
         f"{alias}={alias_to_user_id[alias]}|{alias_names[alias]}"
@@ -529,19 +561,19 @@ async def choose_winner_via_llm(chat_log: list, excluded_user_id=None) -> dict:
         if user_counts:
             most_active = max(user_counts.items(), key=lambda x: x[1])[0]
             fallback_reasons = [
-                f"Настрочил {user_counts[most_active]} сообщений и нихуя умного. Поздравляю, ты душный.",
-                f"За {user_counts[most_active]} сообщений спама. ИИ сломался от твоей тупости, поэтому победа твоя.",
-                "ИИ отказался работать с таким контингентом, поэтому ты пидор просто по факту существования."
+                f"????????? {user_counts[most_active]} ????????? ? ????? ??????. ??????????, ?? ??????.",
+                f"?? {user_counts[most_active]} ????????? ?????. ?? ???????? ?? ????? ???????, ??????? ?????? ????.",
+                "?? ????????? ???????? ? ????? ????????????, ??????? ?? ????? ?????? ?? ????? ?????????????."
             ]
             return {"user_id": most_active, "reason": random.choice(fallback_reasons)}
     
-    return {"user_id": 0, "reason": "Чат мертв, и вы все мертвы внутри."}
+    return {"user_id": 0, "reason": "??? ?????, ? ?? ??? ?????? ??????."}
 
-# ================= ИГРОВАЯ ЛОГИКА =================
+# ================= ??????? ?????? =================
 async def run_game_logic(peer_id: int, reset_if_exists: bool = False):
     """
-    reset_if_exists=True: Если игра запускается таймером, мы удаляем старый результат и выбираем заново.
-    reset_if_exists=False: (По умолчанию) Если играем вручную, бот скажет 'Уже выбрали'.
+    reset_if_exists=True: ???? ???? ??????????? ????????, ?? ??????? ?????? ????????? ? ???????? ??????.
+    reset_if_exists=False: (?? ?????????) ???? ?????? ???????, ??? ?????? '??? ???????'.
     """
     if ALLOWED_PEER_IDS is not None and peer_id not in ALLOWED_PEER_IDS:
         return
@@ -556,13 +588,13 @@ async def run_game_logic(peer_id: int, reset_if_exists: bool = False):
             print(f"ERROR sending message to {peer_id}: {e}")
 
     async with aiosqlite.connect(DB_NAME) as db:
-        # 🔥 ЛОГИКА АВТО-СБРОСА 🔥
+        # ?? ?????? ????-?????? ??
         if reset_if_exists:
-            # Если это авто-запуск, сначала удаляем старую запись
+            # ???? ??? ????-??????, ??????? ??????? ?????? ??????
             await db.execute("DELETE FROM daily_game WHERE peer_id = ? AND date = ?", (peer_id, today))
             await db.commit()
 
-        # Проверяем, есть ли победитель (если сбросили выше, то тут уже ничего не найдет)
+        # ?????????, ???? ?? ?????????? (???? ???????? ????, ?? ??? ??? ?????? ?? ??????)
         cursor = await db.execute("SELECT winner_id, reason FROM daily_game WHERE peer_id = ? AND date = ?", (peer_id, today))
         result = await cursor.fetchone()
 
@@ -573,10 +605,10 @@ async def run_game_logic(peer_id: int, reset_if_exists: bool = False):
                 name = f"{user_info[0].first_name} {user_info[0].last_name}"
             except:
                 name = "Unknown"
-            await send_msg(f"Уже определили!\n{GAME_TITLE}: [id{winner_id}|{name}]\n\n📝 {reason}\n\n(Чтобы сбросить: {CMD_RESET})")
+            await send_msg(f"??? ??????????!\n{GAME_TITLE}: [id{winner_id}|{name}]\n\n?? {reason}\n\n(????? ????????: {CMD_RESET})")
             return
 
-        # Сбор сообщений
+        # ???? ?????????
         cursor = await db.execute(
             "SELECT winner_id FROM last_winner WHERE peer_id = ? LIMIT 1",
             (peer_id,)
@@ -625,7 +657,7 @@ async def run_game_logic(peer_id: int, reset_if_exists: bool = False):
             rows.extend(await cursor.fetchall())
 
         if len(rows) < 3:
-            await send_msg("Мало сообщений. Пишите больше, чтобы я мог выбрать худшего.")
+            await send_msg("???? ?????????. ?????? ??????, ????? ? ??? ??????? ???????.")
             return
 
         chat_log = list(reversed(rows))
@@ -633,27 +665,27 @@ async def run_game_logic(peer_id: int, reset_if_exists: bool = False):
         if last_winner_id is not None and last_winner_id in candidate_ids and len(candidate_ids) > 1:
             exclude_user_id = last_winner_id
 
-    await send_msg(f"🎲 Изучаю {len(chat_log)} сообщений... Кто же сегодня опозорится?")
+    await send_msg(f"?? ?????? {len(chat_log)} ?????????... ??? ?? ??????? ???????????")
     
     try:
         decision = await choose_winner_via_llm(chat_log, excluded_user_id=exclude_user_id)
         winner_id = decision['user_id']
-        reason = decision.get('reason', 'Нет причины')
+        reason = decision.get('reason', '??? ???????')
         
         if winner_id == 0:
-            await send_msg("Ошибка выбора. Попробуйте позже.")
+            await send_msg("?????? ??????. ?????????? ?????.")
             return
 
     except Exception as e:
         print(f"ERROR in game logic: {e}")
-        await send_msg("Ошибка при выборе победителя.")
+        await send_msg("?????? ??? ?????? ??????????.")
         return
 
     try:
         user_data = await bot.api.users.get(user_ids=[winner_id])
         winner_name = f"{user_data[0].first_name} {user_data[0].last_name}"
     except:
-        winner_name = "Жертва"
+        winner_name = "??????"
 
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute(
@@ -667,12 +699,12 @@ async def run_game_logic(peer_id: int, reset_if_exists: bool = False):
         await db.commit()
 
     await send_msg(
-        f"👑 {GAME_TITLE.upper()} НАЙДЕН!\n"
-        f"Поздравляем (нет): [id{winner_id}|{winner_name}]\n\n"
-        f"💬 Вердикт:\n{reason}"
+        f"?? {GAME_TITLE.upper()} ??????!\n"
+        f"??????????? (???): [id{winner_id}|{winner_name}]\n\n"
+        f"?? ???????:\n{reason}"
     )
-# ================= ПЛАНИРОВЩИК =================
-# ================= Лидерборд: утилиты =================
+# ================= ??????????? =================
+# ================= ?????????: ??????? =================
 def last_day_of_month(year: int, month: int) -> int:
     if month == 12:
         next_month = datetime.date(year + 1, 1, 1)
@@ -726,21 +758,21 @@ async def build_leaderboard_text(peer_id: int) -> str:
 
     def format_rows(rows):
         if not rows:
-            return "Нет данных."
-        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+            return "??? ??????."
+        medals = {1: "??", 2: "??", 3: "??"}
         lines = []
         for idx, (uid, wins) in enumerate(rows, start=1):
             name = name_map.get(uid, f"id{uid}")
             medal = medals.get(idx)
             prefix = f"{idx}. {medal}" if medal else f"{idx}."
-            lines.append(f"{prefix} [id{uid}|{name}] — ×{wins}")
+            lines.append(f"{prefix} [id{uid}|{name}] � �{wins}")
         return "\n".join(lines)
 
     month_label = today.strftime("%m.%Y")
     return (
         f"{LEADERBOARD_TITLE}\n\n"
-        f"🗓 За {month_label}:\n{format_rows(month_rows)}\n\n"
-        f"🏆 За все время:\n{format_rows(all_rows)}"
+        f"?? ?? {month_label}:\n{format_rows(month_rows)}\n\n"
+        f"?? ?? ??? ?????:\n{format_rows(all_rows)}"
     )
 
 async def post_leaderboard(peer_id: int, month_key: str):
@@ -760,7 +792,7 @@ async def post_leaderboard(peer_id: int, month_key: str):
         await db.commit()
 
 async def scheduler_loop():
-    print("⏰ Scheduler started...")
+    print("? Scheduler started...")
     while True:
         try:
             now = datetime.datetime.now(MSK_TZ)
@@ -778,7 +810,7 @@ async def scheduler_loop():
                     cursor = await db.execute("SELECT peer_id FROM schedules WHERE time = ?", (now_time,))
                 rows = await cursor.fetchall()
                 if rows:
-                    print(f"⏰ Triggering scheduled games for time {now_time}: {len(rows)} chats")
+                    print(f"? Triggering scheduled games for time {now_time}: {len(rows)} chats")
                     for (peer_id,) in rows:
                         asyncio.create_task(run_game_logic(peer_id))
                 if ALLOWED_PEER_IDS is not None:
@@ -810,7 +842,7 @@ async def scheduler_loop():
             print(f"ERROR in scheduler: {e}")
             await asyncio.sleep(60)
 
-# ================= МЕНЮ НАСТРОЕК =================
+# ================= ???? ???????? =================
 
 @bot.on.message(text=CMD_SETTINGS)
 async def show_settings(message: Message):
@@ -826,16 +858,16 @@ async def show_settings(message: Message):
         active_model = VENICE_MODEL
         active_temperature = VENICE_TEMPERATURE
     if ALLOWED_PEER_IDS is None:
-        access_line = "без ограничений"
+        access_line = "??? ???????????"
     else:
         if len(ALLOWED_PEER_IDS) == 1:
-            peers_label = f"чат {ALLOWED_PEER_IDS[0]}"
+            peers_label = f"??? {ALLOWED_PEER_IDS[0]}"
         else:
-            peers_label = "чаты " + ", ".join(str(pid) for pid in ALLOWED_PEER_IDS)
+            peers_label = "???? " + ", ".join(str(pid) for pid in ALLOWED_PEER_IDS)
         if ADMIN_USER_ID:
-            access_line = f"{peers_label}, ЛС admin {ADMIN_USER_ID}"
+            access_line = f"{peers_label}, ?? admin {ADMIN_USER_ID}"
         else:
-            access_line = f"{peers_label}, ЛС admin не настроены"
+            access_line = f"{peers_label}, ?? admin ?? ?????????"
     schedule_time = None
     leaderboard_day = None
     leaderboard_time = None
@@ -849,110 +881,110 @@ async def show_settings(message: Message):
         if row:
             leaderboard_day, leaderboard_time = row
     if schedule_time:
-        schedule_line = f"Таймер (МСК): `{schedule_time}`\n"
+        schedule_line = f"?????? (???): `{schedule_time}`\n"
     else:
-        schedule_line = "Таймер (МСК): не установлен\n"
+        schedule_line = "?????? (???): ?? ??????????\n"
     if leaderboard_day is not None and leaderboard_time:
-        leaderboard_line = f"Лидерборд (МСК): `{int(leaderboard_day):02d}-{leaderboard_time.replace(':','-')}`\n"
+        leaderboard_line = f"????????? (???): `{int(leaderboard_day):02d}-{leaderboard_time.replace(':','-')}`\n"
     else:
-        leaderboard_line = "Лидерборд (МСК): не установлен\n"
+        leaderboard_line = "????????? (???): ?? ??????????\n"
     text = (
-        f"🎛 **Настройки игры**\n\n"
-        f"🤖 **Провайдер:** `{provider_label}`\n"
-        f"📦 **Доступные провайдеры:** `groq`, `venice`\n"
-        f"🔒 **Доступ:** {access_line}\n"
-        f"🧭 **Peer ID:** `{message.peer_id}`\n"
-        f"🎯 **Модель:** `{active_model}`\n"
-        f"🔑 **Ключ:** `{key_short}`\n"
-        f"🌡 **Температура:** `{active_temperature}`\n"
-        f"Последнее обновление: {format_build_date(BUILD_DATE)}\n"
+        f"?? **????????? ????**\n\n"
+        f"?? **?????????:** `{provider_label}`\n"
+        f"?? **????????? ??????????:** `groq`, `venice`\n"
+        f"?? **??????:** {access_line}\n"
+        f"?? **Peer ID:** `{message.peer_id}`\n"
+        f"?? **??????:** `{active_model}`\n"
+        f"?? **????:** `{key_short}`\n"
+        f"?? **???????????:** `{active_temperature}`\n"
+        f"????????? ??????????: {format_build_date(BUILD_DATE)}\n"
         f"{schedule_line}\n"
         f"{leaderboard_line}\n"
-        f"**⚙ Команды:**\n"
-        f"• `{CMD_SET_PROVIDER} groq|venice` - Выбрать провайдера\n"
-        f"• `{CMD_SET_MODEL} <провайдер> <id>` - Сменить модель\n"
-        f"• `{CMD_SET_KEY} <провайдер> <ключ>` - Новый API ключ\n"
-        f"• `{CMD_SET_TEMPERATURE} <0.0-2.0>` - Установить температуру\n"
-        f"• `{CMD_LIST_MODELS} <провайдер>` - Список моделей (Live)\n\n"
-        f"**🎮 Игра:**\n"
-        f"• `{CMD_RUN}` - Найти пидора дня\n"
-        f"• `{CMD_RESET}` - Сброс результата сегодня\n"
-        f"• `{CMD_LEADERBOARD}` - Лидерборд месяца и все время\n"
-        f"• `{CMD_TIME_SET} 14:00` - Установить авто-поиск (МСК)\n"
-        f"• `{CMD_TIME_RESET}` - Удалить таймер\n"
-        f"• `{CMD_LEADERBOARD_TIMER_SET} 05-18-30` - Таймер лидерборда (МСК)\n"
-        f"• `{CMD_LEADERBOARD_TIMER_RESET}` - Сброс таймера лидерборда"
+        f"**? ???????:**\n"
+        f"� `{CMD_SET_PROVIDER} groq|venice` - ??????? ??????????\n"
+        f"� `{CMD_SET_MODEL} <?????????> <id>` - ??????? ??????\n"
+        f"� `{CMD_SET_KEY} <?????????> <????>` - ????? API ????\n"
+        f"� `{CMD_SET_TEMPERATURE} <0.0-2.0>` - ?????????? ???????????\n"
+        f"� `{CMD_LIST_MODELS} <?????????>` - ?????? ??????? (Live)\n\n"
+        f"**?? ????:**\n"
+        f"� `{CMD_RUN}` - ????? ?????? ???\n"
+        f"� `{CMD_RESET}` - ????? ?????????? ???????\n"
+        f"� `{CMD_LEADERBOARD}` - ????????? ?????? ? ??? ?????\n"
+        f"� `{CMD_TIME_SET} 14:00` - ?????????? ????-????? (???)\n"
+        f"� `{CMD_TIME_RESET}` - ??????? ??????\n"
+        f"� `{CMD_LEADERBOARD_TIMER_SET} 05-18-30` - ?????? ?????????? (???)\n"
+        f"� `{CMD_LEADERBOARD_TIMER_RESET}` - ????? ??????? ??????????"
     )
-    await message.answer(text)
+    await send_reply(message, text)
 @bot.on.message(StartswithRule(CMD_LIST_MODELS))
 async def list_models_handler(message: Message):
     if not is_message_allowed(message):
         return
     args = message.text.replace(CMD_LIST_MODELS, "").strip().lower()
     if not args:
-        await message.answer(f"❌ Укажи провайдера: groq или venice.\nПример: `{CMD_LIST_MODELS} groq`")
+        await send_reply(message, f"? ????? ??????????: groq ??? venice.\n??????: `{CMD_LIST_MODELS} groq`")
         return
     provider = args
     if provider not in ("groq", "venice"):
-        await message.answer("❌ Неверный провайдер. Используй: groq или venice.")
+        await send_reply(message, "? ???????? ?????????. ?????????: groq ??? venice.")
         return
     if provider == "groq":
-        await message.answer("🔄 Связываюсь с API Groq...")
+        await send_reply(message, "?? ?????????? ? API Groq...")
         try:
             if not GROQ_API_KEY:
-                raise RuntimeError("Не найден GROQ_API_KEY")
+                raise RuntimeError("?? ?????? GROQ_API_KEY")
             if AsyncGroq is None:
-                raise RuntimeError("Пакет groq не установлен")
+                raise RuntimeError("????? groq ?? ??????????")
             client = groq_client or AsyncGroq(api_key=GROQ_API_KEY)
             models_response = await client.models.list()
             active_models = sorted([m.id for m in models_response.data], key=lambda x: (not x.startswith("llama"), x))
 
             if not active_models:
-                await message.answer("❌ Список моделей пуст (возможно проблема с ключом).")
+                await send_reply(message, "? ?????? ??????? ???? (???????? ???????? ? ??????).")
                 return
 
-            models_text = "\n".join([f"• `{m}`" for m in active_models[:20]])
-            example_model = active_models[0] if active_models else "ваша_модель"
+            models_text = "\n".join([f"� `{m}`" for m in active_models[:20]])
+            example_model = active_models[0] if active_models else "????_??????"
 
-            await message.answer(
-                f"📜 **Доступные модели (Live API):**\n\n{models_text}\n\n"
-                f"Чтобы применить, скопируй ID и напиши:\n"
+            await send_reply(message, 
+                f"?? **????????? ?????? (Live API):**\n\n{models_text}\n\n"
+                f"????? ?????????, ???????? ID ? ??????:\n"
                 f"{CMD_SET_MODEL} groq {example_model}"
             )
         except Exception as e:
-            await message.answer(f"❌ Ошибка API:\n{e}")
+            await send_reply(message, f"? ?????? API:\n{e}")
         return
 
-    await message.answer("🔄 Связываюсь с API Venice...")
+    await send_reply(message, "?? ?????????? ? API Venice...")
     try:
         if not VENICE_API_KEY:
-            raise RuntimeError("Не найден VENICE_API_KEY")
+            raise RuntimeError("?? ?????? VENICE_API_KEY")
         response = await venice_request("GET", "models")
         models_response = response.json()
         model_ids = sorted({m.get("id") for m in models_response.get("data", []) if m.get("id")})
 
         if not model_ids:
-            await message.answer("❌ Список моделей пуст (возможно проблема с ключом).")
+            await send_reply(message, "? ?????? ??????? ???? (???????? ???????? ? ??????).")
             return
 
-        models_text = "\n".join([f"• `{m}`" for m in model_ids[:20]])
-        example_model = model_ids[0] if model_ids else "ваша_модель"
+        models_text = "\n".join([f"� `{m}`" for m in model_ids[:20]])
+        example_model = model_ids[0] if model_ids else "????_??????"
 
-        await message.answer(
-            f"📜 **Доступные модели (Live API):**\n\n{models_text}\n\n"
-            f"Чтобы применить, скопируй ID и напиши:\n"
+        await send_reply(message, 
+            f"?? **????????? ?????? (Live API):**\n\n{models_text}\n\n"
+            f"????? ?????????, ???????? ID ? ??????:\n"
             f"{CMD_SET_MODEL} venice {example_model}"
         )
     except Exception as e:
-        await message.answer(f"❌ Ошибка API:\n{e}")
+        await send_reply(message, f"? ?????? API:\n{e}")
 
-# ОБРАБОТЧИКИ С НОВЫМ ПРАВИЛОМ
+# ??????????? ? ????? ????????
 @bot.on.message(text=CMD_LEADERBOARD)
 async def leaderboard_handler(message: Message):
     if not is_message_allowed(message):
         return
     text = await build_leaderboard_text(message.peer_id)
-    await message.answer(text)
+    await send_reply(message, text)
 
 @bot.on.message(StartswithRule(CMD_SET_MODEL))
 async def set_model_handler(message: Message):
@@ -961,24 +993,24 @@ async def set_model_handler(message: Message):
     global GROQ_MODEL, VENICE_MODEL
     args = message.text.replace(CMD_SET_MODEL, "").strip()
     if not args:
-        await message.answer(f"❌ Укажите провайдера и модель!\nПример: `{CMD_SET_MODEL} groq llama-3.3-70b-versatile`")
+        await send_reply(message, f"? ??????? ?????????? ? ??????!\n??????: `{CMD_SET_MODEL} groq llama-3.3-70b-versatile`")
         return
     parts = args.split(maxsplit=1)
     if len(parts) < 2:
-        await message.answer(f"❌ Укажите провайдера и модель!\nПример: `{CMD_SET_MODEL} venice venice-uncensored`")
+        await send_reply(message, f"? ??????? ?????????? ? ??????!\n??????: `{CMD_SET_MODEL} venice venice-uncensored`")
         return
     provider, model_id = parts[0].lower(), parts[1].strip()
     if provider not in ("groq", "venice"):
-        await message.answer("❌ Неверный провайдер. Используй: groq или venice.")
+        await send_reply(message, "? ???????? ?????????. ?????????: groq ??? venice.")
         return
     if provider == "groq":
         GROQ_MODEL = model_id
         os.environ["GROQ_MODEL"] = model_id
-        await message.answer(f"✅ Модель Groq изменена на: `{GROQ_MODEL}`")
+        await send_reply(message, f"? ?????? Groq ???????? ??: `{GROQ_MODEL}`")
         return
     VENICE_MODEL = model_id
     os.environ["VENICE_MODEL"] = model_id
-    await message.answer(f"✅ Модель Venice изменена на: `{VENICE_MODEL}`")
+    await send_reply(message, f"? ?????? Venice ???????? ??: `{VENICE_MODEL}`")
 
 @bot.on.message(StartswithRule(CMD_SET_PROVIDER))
 async def set_provider_handler(message: Message):
@@ -987,27 +1019,27 @@ async def set_provider_handler(message: Message):
     global LLM_PROVIDER, groq_client
     args = message.text.replace(CMD_SET_PROVIDER, "").strip().lower()
     if not args:
-        await message.answer(f"Укажи провайдера!\nПример: `{CMD_SET_PROVIDER} groq`")
+        await send_reply(message, f"????? ??????????!\n??????: `{CMD_SET_PROVIDER} groq`")
         return
     if args not in ("groq", "venice"):
-        await message.answer("Неверный провайдер. Используй: groq или venice.")
+        await send_reply(message, "???????? ?????????. ?????????: groq ??? venice.")
         return
     if args == "groq":
         if not GROQ_API_KEY:
-            await message.answer("❌ Не найден GROQ_API_KEY. Сначала укажи ключ.")
+            await send_reply(message, "? ?? ?????? GROQ_API_KEY. ??????? ????? ????.")
             return
         if AsyncGroq is None:
-            await message.answer("❌ Пакет groq не установлен.")
+            await send_reply(message, "? ????? groq ?? ??????????.")
             return
         groq_client = AsyncGroq(api_key=GROQ_API_KEY)
     else:
         if not VENICE_API_KEY:
-            await message.answer("❌ Не найден VENICE_API_KEY. Сначала укажи ключ.")
+            await send_reply(message, "? ?? ?????? VENICE_API_KEY. ??????? ????? ????.")
             return
         groq_client = None
     LLM_PROVIDER = args
     os.environ["LLM_PROVIDER"] = args
-    await message.answer(f"✅ Провайдер изменен на: `{LLM_PROVIDER}`")
+    await send_reply(message, f"? ????????? ??????? ??: `{LLM_PROVIDER}`")
 
 @bot.on.message(StartswithRule(CMD_SET_KEY))
 async def set_key_handler(message: Message):
@@ -1016,33 +1048,33 @@ async def set_key_handler(message: Message):
     global GROQ_API_KEY, VENICE_API_KEY, groq_client
     args = message.text.replace(CMD_SET_KEY, "").strip()
     if not args:
-        await message.answer(f"❌ Укажите провайдера и ключ!\nПример: `{CMD_SET_KEY} groq gsk_***`")
+        await send_reply(message, f"? ??????? ?????????? ? ????!\n??????: `{CMD_SET_KEY} groq gsk_***`")
         return
     parts = args.split(maxsplit=1)
     if len(parts) < 2:
-        await message.answer(f"❌ Укажите провайдера и ключ!\nПример: `{CMD_SET_KEY} venice vnk_***`")
+        await send_reply(message, f"? ??????? ?????????? ? ????!\n??????: `{CMD_SET_KEY} venice vnk_***`")
         return
     provider, key = parts[0].lower(), parts[1].strip()
     if provider not in ("groq", "venice"):
-        await message.answer("❌ Неверный провайдер. Используй: groq или venice.")
+        await send_reply(message, "? ???????? ?????????. ?????????: groq ??? venice.")
         return
     if provider == "groq":
         if AsyncGroq is None:
-            await message.answer("❌ Пакет groq не установлен.")
+            await send_reply(message, "? ????? groq ?? ??????????.")
             return
         GROQ_API_KEY = key
         os.environ["GROQ_API_KEY"] = key
         if LLM_PROVIDER == "groq":
             groq_client = AsyncGroq(api_key=GROQ_API_KEY)
-            await message.answer("✅ API ключ Groq обновлен. Клиент перезапущен.")
+            await send_reply(message, "? API ???? Groq ????????. ?????? ???????????.")
         else:
-            await message.answer("✅ API ключ Groq обновлен.")
+            await send_reply(message, "? API ???? Groq ????????.")
         return
     VENICE_API_KEY = key
     os.environ["VENICE_API_KEY"] = key
-    await message.answer("✅ API ключ Venice обновлен.")
+    await send_reply(message, "? API ???? Venice ????????.")
 
-# ================= ОБЫЧНЫЕ КОМАНДЫ =================
+# ================= ??????? ??????? =================
 
 @bot.on.message(StartswithRule(CMD_SET_TEMPERATURE))
 async def set_temperature_handler(message: Message):
@@ -1051,24 +1083,24 @@ async def set_temperature_handler(message: Message):
     global GROQ_TEMPERATURE, VENICE_TEMPERATURE
     args = message.text.replace(CMD_SET_TEMPERATURE, "").strip()
     if not args:
-        await message.answer(f"Укажи температуру!\nПример: `{CMD_SET_TEMPERATURE} 0.9`")
+        await send_reply(message, f"????? ???????????!\n??????: `{CMD_SET_TEMPERATURE} 0.9`")
         return
     try:
         value = float(args.replace(",", "."))
     except ValueError:
-        await message.answer("Неверное значение температуры. Используй число, например 0.7")
+        await send_reply(message, "???????? ???????? ???????????. ????????? ?????, ???????? 0.7")
         return
     if value < 0 or value > 2:
-        await message.answer("Температура должна быть в диапазоне 0.0-2.0")
+        await send_reply(message, "??????????? ?????? ???? ? ????????? 0.0-2.0")
         return
     if LLM_PROVIDER == "groq":
         GROQ_TEMPERATURE = value
         os.environ["GROQ_TEMPERATURE"] = str(value)
-        await message.answer(f"Температура установлена: `{GROQ_TEMPERATURE}`")
+        await send_reply(message, f"??????????? ???????????: `{GROQ_TEMPERATURE}`")
         return
     VENICE_TEMPERATURE = value
     os.environ["VENICE_TEMPERATURE"] = str(value)
-    await message.answer(f"Температура установлена: `{VENICE_TEMPERATURE}`")
+    await send_reply(message, f"??????????? ???????????: `{VENICE_TEMPERATURE}`")
 
 @bot.on.message(text=CMD_RESET)
 async def reset_daily_game(message: Message):
@@ -1079,7 +1111,7 @@ async def reset_daily_game(message: Message):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("DELETE FROM daily_game WHERE peer_id = ? AND date = ?", (peer_id, today))
         await db.commit()
-    await message.answer("🔄 Результаты аннулированы! Память стерта.\nПишите /кто чтобы выбрать нового пидора.")
+    await send_reply(message, "?? ?????????? ????????????! ?????? ??????.\n?????? /??? ????? ??????? ?????? ??????.")
 
 @bot.on.message(text=CMD_RUN)
 async def trigger_game(message: Message):
@@ -1100,11 +1132,11 @@ async def set_schedule(message: Message):
                 (message.peer_id, args)
             )
             await db.commit()
-        await message.answer(f"⏰ Таймер установлен! Буду искать жертву в {args}. (МСК)")
+        await send_reply(message, f"? ?????? ??????????! ???? ?????? ?????? ? {args}. (???)")
     except ValueError:
-        await message.answer("❌ Неверный формат! Используйте: /время 14:00 (МСК)")
+        await send_reply(message, "? ???????? ??????! ???????????: /????? 14:00 (???)")
     except Exception as e:
-        await message.answer(f"Ошибка: {e}")
+        await send_reply(message, f"??????: {e}")
 
 @bot.on.message(text=CMD_TIME_RESET)
 async def unset_schedule(message: Message):
@@ -1113,7 +1145,7 @@ async def unset_schedule(message: Message):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("DELETE FROM schedules WHERE peer_id = ?", (message.peer_id,))
         await db.commit()
-    await message.answer("🔕 Таймер удален.")
+    await send_reply(message, "?? ?????? ??????.")
 
 @bot.on.message(StartswithRule(CMD_LEADERBOARD_TIMER_SET))
 async def set_leaderboard_timer(message: Message):
@@ -1122,13 +1154,13 @@ async def set_leaderboard_timer(message: Message):
     args = message.text.replace(CMD_LEADERBOARD_TIMER_SET, "").strip()
     match = re.match(r"^(\d{1,2})-(\d{1,2})-(\d{1,2})$", args)
     if not match:
-        await message.answer(f"❌ Неверный формат! Используйте: `{CMD_LEADERBOARD_TIMER_SET} 05-18-30` (МСК)")
+        await send_reply(message, f"? ???????? ??????! ???????????: `{CMD_LEADERBOARD_TIMER_SET} 05-18-30` (???)")
         return
     day = int(match.group(1))
     hour = int(match.group(2))
     minute = int(match.group(3))
     if day < 1 or day > 31 or hour < 0 or hour > 23 or minute < 0 or minute > 59:
-        await message.answer("❌ Неверные значения. Формат: ДД-ЧЧ-ММ (МСК)")
+        await send_reply(message, "? ???????? ????????. ??????: ??-??-?? (???)")
         return
     time_str = f"{hour:02d}:{minute:02d}"
     async with aiosqlite.connect(DB_NAME) as db:
@@ -1137,7 +1169,7 @@ async def set_leaderboard_timer(message: Message):
             (message.peer_id, day, time_str)
         )
         await db.commit()
-    await message.answer(f"✅ Таймер лидерборда установлен: `{day:02d}-{hour:02d}-{minute:02d}` (МСК)")
+    await send_reply(message, f"? ?????? ?????????? ??????????: `{day:02d}-{hour:02d}-{minute:02d}` (???)")
 
 @bot.on.message(text=CMD_LEADERBOARD_TIMER_RESET)
 async def reset_leaderboard_timer(message: Message):
@@ -1146,11 +1178,13 @@ async def reset_leaderboard_timer(message: Message):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("DELETE FROM leaderboard_schedule WHERE peer_id = ?", (message.peer_id,))
         await db.commit()
-    await message.answer("✅ Таймер лидерборда сброшен.")
+    await send_reply(message, "? ?????? ?????????? ???????.")
 
 @bot.on.message()
 async def mention_reply_handler(message: Message):
     if not is_message_allowed(message):
+        return
+    if not CHATBOT_ENABLED:
         return
     if not message.text:
         return
@@ -1167,27 +1201,31 @@ async def mention_reply_handler(message: Message):
         return
     cleaned = message.text if is_admin_dm else strip_bot_mention(message.text)
     if not cleaned:
-        await message.answer("Напиши сообщение после упоминания.")
+        await send_reply(message, "?????? ????????? ????? ??????????.")
         return
     if cleaned.startswith("/"):
         return
     try:
         cleaned_for_llm = trim_chat_text(cleaned)
         if not cleaned_for_llm:
-            await message.answer("Напиши сообщение после упоминания.")
+            await send_reply(message, "?????? ????????? ????? ??????????.")
             return
         reply_text = extract_reply_text(message)
         if reply_text:
             reply_text = trim_chat_text(reply_text)
             if reply_text:
-                cleaned_for_llm = f"Контекст реплая: {reply_text}\n\n{cleaned_for_llm}"
+                cleaned_for_llm = f"???????? ??????: {reply_text}\n\n{cleaned_for_llm}"
         history_messages = await build_chat_history(message.peer_id, message.from_id)
 
         chat_messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
         chat_messages.extend(history_messages)
         chat_messages.append({"role": "user", "content": cleaned_for_llm})
-        response_text = await fetch_llm_messages(chat_messages)
-        await message.answer(response_text)
+        response_text = await fetch_llm_messages(chat_messages, max_tokens=CHAT_MAX_TOKENS)
+        response_text = trim_text(response_text, CHAT_RESPONSE_MAX_CHARS)
+        if not response_text:
+            await send_reply(message, "? ????? ????????? ??????. ???????? ?????.")
+            return
+        await send_reply(message, response_text)
         response_for_store = trim_text(response_text, BOT_REPLY_FULL_MAX_CHARS)
         async with aiosqlite.connect(DB_NAME) as db:
             await db.execute(
@@ -1203,7 +1241,7 @@ async def mention_reply_handler(message: Message):
             await db.commit()
     except Exception as e:
         print(f"ERROR: Mention reply failed: {e}")
-        await message.answer("❌ Ошибка ответа. Попробуй позже.")
+        await send_reply(message, "? ?????? ??????. ???????? ?????.")
 
 @bot.on.message()
 async def logger(message: Message):
@@ -1235,7 +1273,8 @@ async def start_background_tasks():
     asyncio.create_task(scheduler_loop())
 
 if __name__ == "__main__":
-    print(f"🚀 Starting {GAME_TITLE} bot...")
+    print(f"?? Starting {GAME_TITLE} bot...")
     logging.basicConfig(level=logging.DEBUG)
     bot.loop_wrapper.on_startup.append(start_background_tasks())
     bot.run_forever()
+
