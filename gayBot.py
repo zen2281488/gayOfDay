@@ -349,6 +349,18 @@ def is_message_allowed(message: Message) -> bool:
         return True
     return False
 
+def get_reply_to_id(message: Message):
+    reply_to = getattr(message, "conversation_message_id", None)
+    if isinstance(reply_to, int) and reply_to > 0:
+        return reply_to
+    return None
+
+async def send_reply(message: Message, text: str, **kwargs):
+    reply_to = get_reply_to_id(message)
+    if reply_to:
+        kwargs.setdefault("reply_to", reply_to)
+    await message.answer(text, **kwargs)
+
 
 bot = Bot(token=VK_TOKEN)
 groq_client = AsyncGroq(api_key=GROQ_API_KEY) if LLM_PROVIDER == "groq" and AsyncGroq else None
