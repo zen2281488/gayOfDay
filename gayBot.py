@@ -49,6 +49,18 @@ ALLOWED_PEER_IDS = read_int_list_env("ALLOWED_PEER_ID")
 if not ALLOWED_PEER_IDS:
     ALLOWED_PEER_IDS = None
 
+CHAT_HISTORY_LIMIT = read_int_env("CHAT_HISTORY_LIMIT")
+if CHAT_HISTORY_LIMIT is None:
+    CHAT_HISTORY_LIMIT = 6
+if CHAT_HISTORY_LIMIT < 0:
+    CHAT_HISTORY_LIMIT = 0
+
+CHAT_MESSAGE_MAX_CHARS = read_int_env("CHAT_MESSAGE_MAX_CHARS")
+if CHAT_MESSAGE_MAX_CHARS is None:
+    CHAT_MESSAGE_MAX_CHARS = 300
+if CHAT_MESSAGE_MAX_CHARS < 0:
+    CHAT_MESSAGE_MAX_CHARS = 0
+
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 try:
@@ -199,6 +211,16 @@ def strip_bot_mention(text: str) -> str:
     cleaned = re.sub(rf"@(?:club|public){group_id}\b", "", cleaned, flags=re.IGNORECASE)
     return cleaned.strip()
 
+def trim_chat_text(text: str) -> str:
+    if not text:
+        return ""
+    if CHAT_MESSAGE_MAX_CHARS <= 0:
+        return text.strip()
+    cleaned = text.strip()
+    if len(cleaned) > CHAT_MESSAGE_MAX_CHARS:
+        return cleaned[:CHAT_MESSAGE_MAX_CHARS].rstrip()
+    return cleaned
+
 def extract_group_id(group_response):
     if not group_response:
         return None
@@ -253,6 +275,8 @@ async def venice_request(method: str, path: str, **kwargs) -> httpx.Response:
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("CREATE TABLE IF NOT EXISTS messages (user_id INTEGER, peer_id INTEGER, text TEXT, timestamp INTEGER, username TEXT)")
+        await db.execute("CREATE TABLE IF NOT EXISTS bot_dialogs (id INTEGER PRIMARY KEY AUTOINCREMENT, peer_id INTEGER, user_id INTEGER, role TEXT, text TEXT, timestamp INTEGER)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_bot_dialogs_peer_user_time ON bot_dialogs (peer_id, user_id, timestamp)")
         await db.execute("CREATE TABLE IF NOT EXISTS daily_game (peer_id INTEGER, date TEXT, winner_id INTEGER, reason TEXT, PRIMARY KEY (peer_id, date))")
         await db.execute("CREATE TABLE IF NOT EXISTS last_winner (peer_id INTEGER PRIMARY KEY, winner_id INTEGER, timestamp INTEGER)")
         await db.execute("CREATE TABLE IF NOT EXISTS leaderboard_schedule (peer_id INTEGER PRIMARY KEY, day INTEGER, time TEXT, last_run_month TEXT)")
@@ -260,15 +284,12 @@ async def init_db():
         await db.commit()
 
 # ================= LLM ЛОГИКА =================
-async def fetch_llm_content(system_prompt: str, user_prompt: str) -> str:
+async def fetch_llm_messages(messages: list) -> str:
     if LLM_PROVIDER == "venice":
         print(f"DEBUG: Sending request to Venice. Model: {VENICE_MODEL}, Temp: {VENICE_TEMPERATURE}")
         payload = {
             "model": VENICE_MODEL,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            "messages": messages,
             "temperature": VENICE_TEMPERATURE,
             "max_tokens": 800,
             "venice_parameters": {
@@ -291,10 +312,7 @@ async def fetch_llm_content(system_prompt: str, user_prompt: str) -> str:
     print(f"DEBUG: Sending request to Groq. Model: {GROQ_MODEL}, Temp: {GROQ_TEMPERATURE}")
     completion = await groq_client.chat.completions.create(
         model=GROQ_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+        messages=messages,
         temperature=GROQ_TEMPERATURE,
         max_tokens=800,
     )
@@ -302,6 +320,13 @@ async def fetch_llm_content(system_prompt: str, user_prompt: str) -> str:
     if not content:
         raise ValueError("Empty content in Groq response")
     return content
+
+async def fetch_llm_content(system_prompt: str, user_prompt: str) -> str:
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    return await fetch_llm_messages(messages)
 
 
 async def choose_winner_via_llm(chat_log: list, excluded_user_id=None) -> dict:
@@ -1035,8 +1060,50 @@ async def mention_reply_handler(message: Message):
     if cleaned.startswith("/"):
         return
     try:
-        response_text = await fetch_llm_content(CHAT_SYSTEM_PROMPT, cleaned)
+        cleaned_for_llm = trim_chat_text(cleaned)
+        if not cleaned_for_llm:
+            await message.answer("Напиши сообщение после упоминания.")
+            return
+        reply_message = getattr(message, "reply_message", None)
+        reply_text = None
+        if reply_message:
+            reply_text = getattr(reply_message, "text", None)
+            if reply_text is None and isinstance(reply_message, dict):
+                reply_text = reply_message.get("text")
+        if reply_text:
+            reply_text = trim_chat_text(str(reply_text))
+            if reply_text:
+                cleaned_for_llm = f"Контекст реплая: {reply_text}\n\n{cleaned_for_llm}"
+        history_messages = []
+        if CHAT_HISTORY_LIMIT > 0:
+            async with aiosqlite.connect(DB_NAME) as db:
+                cursor = await db.execute(
+                    """
+                    SELECT text
+                    FROM bot_dialogs
+                    WHERE peer_id = ? AND user_id = ? AND role = 'user'
+                    ORDER BY timestamp DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (message.peer_id, message.from_id, CHAT_HISTORY_LIMIT),
+                )
+                rows = await cursor.fetchall()
+            for (text,) in reversed(rows):
+                if not text:
+                    continue
+                history_messages.append({"role": "user", "content": trim_chat_text(text)})
+
+        chat_messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
+        chat_messages.extend(history_messages)
+        chat_messages.append({"role": "user", "content": cleaned_for_llm})
+        response_text = await fetch_llm_messages(chat_messages)
         await message.answer(response_text)
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute(
+                "INSERT INTO bot_dialogs (peer_id, user_id, role, text, timestamp) VALUES (?, ?, ?, ?, ?)",
+                (message.peer_id, message.from_id, "user", trim_chat_text(cleaned), message.date),
+            )
+            await db.commit()
     except Exception as e:
         print(f"ERROR: Mention reply failed: {e}")
         await message.answer("❌ Ошибка ответа. Попробуй позже.")
