@@ -21,15 +21,36 @@ except ImportError:
 VK_TOKEN = os.getenv("VK_TOKEN")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "").strip().lower()
 
-def read_int_env(name: str):
+TRUE_VALUES = {"1", "true", "yes", "on"}
+
+def read_bool_env(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
-    if not value:
-        return None
+    if value is None or value == "":
+        return default
+    return value.strip().lower() in TRUE_VALUES
+
+def read_int_env(name: str, default: int | None = None, min_value: int | None = None) -> int | None:
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
     try:
-        return int(value)
+        number = int(value)
     except ValueError:
         print(f"WARNING: {name} is not a valid integer")
-        return None
+        return default
+    if min_value is not None and number < min_value:
+        return min_value
+    return number
+
+def read_float_env(name: str, default: float | None = None) -> float | None:
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        print(f"WARNING: {name} is not a valid float")
+        return default
 
 def read_int_list_env(name: str):
     value = os.getenv(name)
@@ -49,71 +70,23 @@ ALLOWED_PEER_IDS = read_int_list_env("ALLOWED_PEER_ID")
 if not ALLOWED_PEER_IDS:
     ALLOWED_PEER_IDS = None
 
-CHATBOT_ENABLED = os.getenv("CHATBOT_ENABLED", "true").strip().lower() in (
-    "1",
-    "true",
-    "yes",
-)
+CHATBOT_ENABLED = read_bool_env("CHATBOT_ENABLED", default=True)
 
-CHAT_HISTORY_LIMIT = read_int_env("CHAT_HISTORY_LIMIT")
-if CHAT_HISTORY_LIMIT is None:
-    CHAT_HISTORY_LIMIT = 6
-if CHAT_HISTORY_LIMIT < 0:
-    CHAT_HISTORY_LIMIT = 0
+CHAT_HISTORY_LIMIT = read_int_env("CHAT_HISTORY_LIMIT", default=6, min_value=0)
+CHAT_MESSAGE_MAX_CHARS = read_int_env("CHAT_MESSAGE_MAX_CHARS", default=300, min_value=0)
+LLM_MAX_TOKENS = read_int_env("LLM_MAX_TOKENS", default=800, min_value=1)
+CHAT_MAX_TOKENS = read_int_env("CHAT_MAX_TOKENS", default=300, min_value=1)
+CHAT_RESPONSE_MAX_CHARS = read_int_env("CHAT_RESPONSE_MAX_CHARS", default=600, min_value=0)
 
-CHAT_MESSAGE_MAX_CHARS = read_int_env("CHAT_MESSAGE_MAX_CHARS")
-if CHAT_MESSAGE_MAX_CHARS is None:
-    CHAT_MESSAGE_MAX_CHARS = 300
-if CHAT_MESSAGE_MAX_CHARS < 0:
-    CHAT_MESSAGE_MAX_CHARS = 0
-
-LLM_MAX_TOKENS = read_int_env("LLM_MAX_TOKENS")
-if LLM_MAX_TOKENS is None:
-    LLM_MAX_TOKENS = 800
-if LLM_MAX_TOKENS < 1:
-    LLM_MAX_TOKENS = 1
-
-CHAT_MAX_TOKENS = read_int_env("CHAT_MAX_TOKENS")
-if CHAT_MAX_TOKENS is None:
-    CHAT_MAX_TOKENS = 300
-if CHAT_MAX_TOKENS < 1:
-    CHAT_MAX_TOKENS = 1
-
-CHAT_RESPONSE_MAX_CHARS = read_int_env("CHAT_RESPONSE_MAX_CHARS")
-if CHAT_RESPONSE_MAX_CHARS is None:
-    CHAT_RESPONSE_MAX_CHARS = 600
-if CHAT_RESPONSE_MAX_CHARS < 0:
-    CHAT_RESPONSE_MAX_CHARS = 0
-
-BOT_REPLY_FULL_LIMIT = read_int_env("CHAT_BOT_FULL_LIMIT")
-if BOT_REPLY_FULL_LIMIT is None:
-    BOT_REPLY_FULL_LIMIT = 2
-if BOT_REPLY_FULL_LIMIT < 0:
-    BOT_REPLY_FULL_LIMIT = 0
-
-BOT_REPLY_SHORT_LIMIT = read_int_env("CHAT_BOT_SHORT_LIMIT")
-if BOT_REPLY_SHORT_LIMIT is None:
-    BOT_REPLY_SHORT_LIMIT = 2
-if BOT_REPLY_SHORT_LIMIT < 0:
-    BOT_REPLY_SHORT_LIMIT = 0
-
-BOT_REPLY_FULL_MAX_CHARS = read_int_env("CHAT_BOT_FULL_MAX_CHARS")
-if BOT_REPLY_FULL_MAX_CHARS is None:
-    BOT_REPLY_FULL_MAX_CHARS = 800
-if BOT_REPLY_FULL_MAX_CHARS < 0:
-    BOT_REPLY_FULL_MAX_CHARS = 0
-
-BOT_REPLY_SHORT_MAX_CHARS = read_int_env("CHAT_BOT_SHORT_MAX_CHARS")
-if BOT_REPLY_SHORT_MAX_CHARS is None:
-    BOT_REPLY_SHORT_MAX_CHARS = 160
-if BOT_REPLY_SHORT_MAX_CHARS < 0:
-    BOT_REPLY_SHORT_MAX_CHARS = 0
+BOT_REPLY_FULL_LIMIT = read_int_env("CHAT_BOT_FULL_LIMIT", default=2, min_value=0)
+BOT_REPLY_SHORT_LIMIT = read_int_env("CHAT_BOT_SHORT_LIMIT", default=2, min_value=0)
+BOT_REPLY_FULL_MAX_CHARS = read_int_env("CHAT_BOT_FULL_MAX_CHARS", default=800, min_value=0)
+BOT_REPLY_SHORT_MAX_CHARS = read_int_env("CHAT_BOT_SHORT_MAX_CHARS", default=160, min_value=0)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-try:
-    GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.9"))
-except ValueError:
+GROQ_TEMPERATURE = read_float_env("GROQ_TEMPERATURE", default=0.9)
+if GROQ_TEMPERATURE is None:
     GROQ_TEMPERATURE = 0.9
 
 VENICE_API_KEY = os.getenv("VENICE_API_KEY")
@@ -122,21 +95,15 @@ VENICE_BASE_URL = os.getenv("VENICE_BASE_URL", "https://api.venice.ai/api/v1/")
 if not VENICE_BASE_URL.endswith("/"):
     VENICE_BASE_URL += "/"
 
-try:
-    VENICE_TEMPERATURE = float(os.getenv("VENICE_TEMPERATURE", "0.9"))
-except ValueError:
+VENICE_TEMPERATURE = read_float_env("VENICE_TEMPERATURE", default=0.9)
+if VENICE_TEMPERATURE is None:
     VENICE_TEMPERATURE = 0.9
 
-try:
-    VENICE_TIMEOUT = float(os.getenv("VENICE_TIMEOUT", "30"))
-except ValueError:
+VENICE_TIMEOUT = read_float_env("VENICE_TIMEOUT", default=30.0)
+if VENICE_TIMEOUT is None:
     VENICE_TIMEOUT = 30.0
 
-VENICE_INCLUDE_SYSTEM_PROMPT = os.getenv("VENICE_INCLUDE_SYSTEM_PROMPT", "false").strip().lower() in (
-    "1",
-    "true",
-    "yes",
-)
+VENICE_INCLUDE_SYSTEM_PROMPT = read_bool_env("VENICE_INCLUDE_SYSTEM_PROMPT", default=False)
 
 if not LLM_PROVIDER:
     if VENICE_API_KEY and not GROQ_API_KEY:
@@ -826,7 +793,7 @@ async def scheduler_loop():
                 if rows:
                     print(f"⏰ Triggering scheduled games for time {now_time}: {len(rows)} chats")
                     for (peer_id,) in rows:
-                        asyncio.create_task(run_game_logic(peer_id))
+                        asyncio.create_task(run_game_logic(peer_id, reset_if_exists=True))
                 if ALLOWED_PEER_IDS is not None:
                     placeholders = ", ".join(["?"] * len(ALLOWED_PEER_IDS))
                     cursor = await db.execute(
