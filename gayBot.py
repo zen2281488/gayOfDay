@@ -184,6 +184,27 @@ def strip_bot_mention(text: str) -> str:
     cleaned = re.sub(rf"@(?:club|public){group_id}\b", "", cleaned, flags=re.IGNORECASE)
     return cleaned.strip()
 
+def extract_group_id(group_response):
+    if not group_response:
+        return None
+    if isinstance(group_response, list):
+        first = group_response[0] if group_response else None
+        return getattr(first, "id", None) if first else None
+    direct_id = getattr(group_response, "id", None)
+    if direct_id:
+        return direct_id
+    groups = getattr(group_response, "groups", None)
+    if groups:
+        first = groups[0]
+        return getattr(first, "id", None)
+    response = getattr(group_response, "response", None)
+    if response:
+        groups = getattr(response, "groups", None)
+        if groups:
+            first = groups[0]
+            return getattr(first, "id", None)
+    return None
+
 def is_message_allowed(message: Message) -> bool:
     if ALLOWED_PEER_ID is None:
         return True
@@ -638,7 +659,7 @@ async def show_settings(message: Message):
         f"{leaderboard_line}\n"
         f"**⚙ Команды:**\n"
         f"• `{CMD_SET_PROVIDER} groq|venice` - Выбрать провайдера\n"
-        f"• `{CMD_SET_MODEL} <id>` - Сменить модель\n"
+        f"• `{CMD_SET_MODEL} <провайдер> <id>` - Сменить модель\n"
         f"• `{CMD_SET_KEY} <провайдер> <ключ>` - Новый API ключ\n"
         f"• `{CMD_SET_TEMPERATURE} <0.0-2.0>` - Установить температуру\n"
         f"• `{CMD_LIST_MODELS} <провайдер>` - Список моделей (Live)\n\n"
@@ -685,7 +706,7 @@ async def list_models_handler(message: Message):
             await message.answer(
                 f"📜 **Доступные модели (Live API):**\n\n{models_text}\n\n"
                 f"Чтобы применить, скопируй ID и напиши:\n"
-                f"{CMD_SET_MODEL} {example_model}"
+                f"{CMD_SET_MODEL} groq {example_model}"
             )
         except Exception as e:
             await message.answer(f"❌ Ошибка API:\n{e}")
@@ -709,7 +730,7 @@ async def list_models_handler(message: Message):
         await message.answer(
             f"📜 **Доступные модели (Live API):**\n\n{models_text}\n\n"
             f"Чтобы применить, скопируй ID и напиши:\n"
-            f"{CMD_SET_MODEL} {example_model}"
+            f"{CMD_SET_MODEL} venice {example_model}"
         )
     except Exception as e:
         await message.answer(f"❌ Ошибка API:\n{e}")
@@ -729,16 +750,24 @@ async def set_model_handler(message: Message):
     global GROQ_MODEL, VENICE_MODEL
     args = message.text.replace(CMD_SET_MODEL, "").strip()
     if not args:
-        await message.answer(f"❌ Укажите модель!\nПример: `{CMD_SET_MODEL} llama-3.3-70b`")
+        await message.answer(f"❌ Укажите провайдера и модель!\nПример: `{CMD_SET_MODEL} groq llama-3.3-70b-versatile`")
         return
-    if LLM_PROVIDER == "groq":
-        GROQ_MODEL = args
-        os.environ["GROQ_MODEL"] = args
-        await message.answer(f"✅ Модель изменена на: `{GROQ_MODEL}`")
+    parts = args.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer(f"❌ Укажите провайдера и модель!\nПример: `{CMD_SET_MODEL} venice venice-uncensored`")
         return
-    VENICE_MODEL = args
-    os.environ["VENICE_MODEL"] = args
-    await message.answer(f"✅ Модель изменена на: `{VENICE_MODEL}`")
+    provider, model_id = parts[0].lower(), parts[1].strip()
+    if provider not in ("groq", "venice"):
+        await message.answer("❌ Неверный провайдер. Используй: groq или venice.")
+        return
+    if provider == "groq":
+        GROQ_MODEL = model_id
+        os.environ["GROQ_MODEL"] = model_id
+        await message.answer(f"✅ Модель Groq изменена на: `{GROQ_MODEL}`")
+        return
+    VENICE_MODEL = model_id
+    os.environ["VENICE_MODEL"] = model_id
+    await message.answer(f"✅ Модель Venice изменена на: `{VENICE_MODEL}`")
 
 @bot.on.message(StartswithRule(CMD_SET_PROVIDER))
 async def set_provider_handler(message: Message):
@@ -957,9 +986,10 @@ async def start_background_tasks():
     await init_db()
     global BOT_GROUP_ID
     try:
-        groups = await bot.api.groups.get_by_id()
-        if groups:
-            BOT_GROUP_ID = groups[0].id
+        group_response = await bot.api.groups.get_by_id()
+        BOT_GROUP_ID = extract_group_id(group_response)
+        if not BOT_GROUP_ID:
+            print("WARNING: Failed to detect BOT_GROUP_ID from API response")
     except Exception as e:
         print(f"ERROR: Failed to load group id: {e}")
     asyncio.create_task(scheduler_loop())
