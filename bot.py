@@ -1,17 +1,19 @@
-﻿import os
-import sys
-import json
-import random
+﻿import asyncio
 import datetime
-import asyncio
-import aiosqlite
-import traceback
-import re
-from collections import Counter
-from vkbottle.bot import Bot, Message
-from vkbottle.dispatch.rules import ABCRule # Для создания своего правила
+import json
 import logging
+import os
+import random
+import re
+import sys
+import traceback
+from collections import Counter
+
+import aiosqlite
 import httpx
+from vkbottle.bot import Bot, Message
+from vkbottle.dispatch.rules import ABCRule  # Для создания своего правила
+
 try:
     from groq import AsyncGroq
 except ImportError:
@@ -148,6 +150,7 @@ CMD_SET_KEY = "/установить_ключ"
 CMD_SET_TEMPERATURE = "/установить_температуру"
 CMD_SET_PROVIDER = "/провайдер"
 CMD_LIST_MODELS = "/список_моделей"
+CMD_PROMPT = "/промт"
 CMD_LEADERBOARD = "/лидерборд"
 CMD_LEADERBOARD_TIMER_SET = "/таймер_лидерборда"
 CMD_LEADERBOARD_TIMER_RESET = "/сброс_таймера_лидерборда"
@@ -170,19 +173,35 @@ def format_build_date(value: str) -> str:
     except Exception:
         return value
 
-# Свое правило (проверка startswith)
+# Свои правила (case-insensitive)
 class StartswithRule(ABCRule[Message]):
     def __init__(self, prefix: str):
-        self.prefix = prefix
+        self.prefix = prefix.lower()
 
     async def check(self, event: Message) -> bool:
-        return event.text.startswith(self.prefix)
+        text = (event.text or "").strip().lower()
+        return text.startswith(self.prefix)
+
+class EqualsRule(ABCRule[Message]):
+    def __init__(self, text: str):
+        self.text = text.lower()
+
+    async def check(self, event: Message) -> bool:
+        return (event.text or "").strip().lower() == self.text
 
 # Промпт
 def normalize_prompt(value: str) -> str:
     if not value:
         return ""
     return value.replace("\\r\\n", "\n").replace("\\n", "\n")
+
+def strip_command(text: str, command: str) -> str:
+    if not text:
+        return ""
+    trimmed = text.strip()
+    if trimmed.lower().startswith(command.lower()):
+        return trimmed[len(command):].strip()
+    return trimmed
 
 SYSTEM_PROMPT = (
     "Формат ответа — строго валидный JSON, только объект и только двойные кавычки. "
@@ -825,7 +844,7 @@ async def scheduler_loop():
 
 # ================= МЕНЮ НАСТРОЕК =================
 
-@bot.on.message(text=CMD_SETTINGS)
+@bot.on.message(EqualsRule(CMD_SETTINGS))
 async def show_settings(message: Message):
     if not is_message_allowed(message):
         return
@@ -887,6 +906,7 @@ async def show_settings(message: Message):
         f"• `{CMD_SET_KEY} <провайдер> <ключ>` - Новый API ключ\n"
         f"• `{CMD_SET_TEMPERATURE} <0.0-2.0>` - Установить температуру\n"
         f"• `{CMD_LIST_MODELS} <провайдер>` - Список моделей (Live)\n\n"
+        f"• `{CMD_PROMPT}` или `{CMD_PROMPT} <текст>` - Показать/обновить user prompt\n\n"
         f"**🎮 Игра:**\n"
         f"• `{CMD_RUN}` - Найти пидора дня\n"
         f"• `{CMD_RESET}` - Сброс результата сегодня\n"
@@ -901,7 +921,7 @@ async def show_settings(message: Message):
 async def list_models_handler(message: Message):
     if not is_message_allowed(message):
         return
-    args = message.text.replace(CMD_LIST_MODELS, "").strip().lower()
+    args = strip_command(message.text, CMD_LIST_MODELS).lower()
     if not args:
         await send_reply(message, f"❌ Укажи провайдера: groq или venice.\nПример: `{CMD_LIST_MODELS} groq`")
         return
@@ -959,8 +979,30 @@ async def list_models_handler(message: Message):
     except Exception as e:
         await send_reply(message, f"❌ Ошибка API:\n{e}")
 
+# ================= USER PROMPT =================
+
+@bot.on.message(StartswithRule(CMD_PROMPT))
+async def prompt_handler(message: Message):
+    if not is_message_allowed(message):
+        return
+    args = strip_command(message.text, CMD_PROMPT)
+    global USER_PROMPT_TEMPLATE
+    if not args:
+        if USER_PROMPT_TEMPLATE:
+            await send_reply(message, f"Текущий USER_PROMPT_TEMPLATE:\n{USER_PROMPT_TEMPLATE}")
+        else:
+            await send_reply(message, "USER_PROMPT_TEMPLATE не задан.")
+        return
+    updated = normalize_prompt(args)
+    if not updated:
+        await send_reply(message, "Промпт пустой.")
+        return
+    USER_PROMPT_TEMPLATE = updated
+    os.environ["USER_PROMPT_TEMPLATE"] = updated
+    await send_reply(message, "✅ USER_PROMPT_TEMPLATE обновлен (в памяти).")
+
 # Лидерборд по текущему чату
-@bot.on.message(text=CMD_LEADERBOARD)
+@bot.on.message(EqualsRule(CMD_LEADERBOARD))
 async def leaderboard_handler(message: Message):
     if not is_message_allowed(message):
         return
@@ -972,7 +1014,7 @@ async def set_model_handler(message: Message):
     if not is_message_allowed(message):
         return
     global GROQ_MODEL, VENICE_MODEL
-    args = message.text.replace(CMD_SET_MODEL, "").strip()
+    args = strip_command(message.text, CMD_SET_MODEL)
     if not args:
         await send_reply(message, f"❌ Укажи провайдера и модель!\nПример: `{CMD_SET_MODEL} groq llama-3.3-70b-versatile`")
         return
@@ -998,7 +1040,7 @@ async def set_provider_handler(message: Message):
     if not is_message_allowed(message):
         return
     global LLM_PROVIDER, groq_client
-    args = message.text.replace(CMD_SET_PROVIDER, "").strip().lower()
+    args = strip_command(message.text, CMD_SET_PROVIDER).lower()
     if not args:
         await send_reply(message, f"❌ Укажи провайдера!\nПример: `{CMD_SET_PROVIDER} groq`")
         return
@@ -1027,7 +1069,7 @@ async def set_key_handler(message: Message):
     if not is_message_allowed(message):
         return
     global GROQ_API_KEY, VENICE_API_KEY, groq_client
-    args = message.text.replace(CMD_SET_KEY, "").strip()
+    args = strip_command(message.text, CMD_SET_KEY)
     if not args:
         await send_reply(message, f"❌ Укажи провайдера и ключ!\nПример: `{CMD_SET_KEY} groq gsk_***`")
         return
@@ -1062,7 +1104,7 @@ async def set_temperature_handler(message: Message):
     if not is_message_allowed(message):
         return
     global GROQ_TEMPERATURE, VENICE_TEMPERATURE
-    args = message.text.replace(CMD_SET_TEMPERATURE, "").strip()
+    args = strip_command(message.text, CMD_SET_TEMPERATURE)
     if not args:
         await send_reply(message, f"❌ Укажи температуру!\nПример: `{CMD_SET_TEMPERATURE} 0.9`")
         return
@@ -1083,7 +1125,7 @@ async def set_temperature_handler(message: Message):
     os.environ["VENICE_TEMPERATURE"] = str(value)
     await send_reply(message, f"✅ Температура Venice установлена: `{VENICE_TEMPERATURE}`")
 
-@bot.on.message(text=CMD_RESET)
+@bot.on.message(EqualsRule(CMD_RESET))
 async def reset_daily_game(message: Message):
     if not is_message_allowed(message):
         return
@@ -1094,7 +1136,7 @@ async def reset_daily_game(message: Message):
         await db.commit()
     await send_reply(message, f"✅ Результат сброшен! Можно начинать заново.\nКоманда {CMD_RUN} снова выберет пидора дня.")
 
-@bot.on.message(text=CMD_RUN)
+@bot.on.message(EqualsRule(CMD_RUN))
 async def trigger_game(message: Message):
     if not is_message_allowed(message):
         return
@@ -1105,7 +1147,7 @@ async def set_schedule(message: Message):
     if not is_message_allowed(message):
         return
     try:
-        args = message.text.replace(CMD_TIME_SET, "").strip()
+        args = strip_command(message.text, CMD_TIME_SET)
         datetime.datetime.strptime(args, "%H:%M")
         async with aiosqlite.connect(DB_NAME) as db:
             await db.execute(
@@ -1119,7 +1161,7 @@ async def set_schedule(message: Message):
     except Exception as e:
         await send_reply(message, f"❌ Ошибка: {e}")
 
-@bot.on.message(text=CMD_TIME_RESET)
+@bot.on.message(EqualsRule(CMD_TIME_RESET))
 async def unset_schedule(message: Message):
     if not is_message_allowed(message):
         return
@@ -1132,7 +1174,7 @@ async def unset_schedule(message: Message):
 async def set_leaderboard_timer(message: Message):
     if not is_message_allowed(message):
         return
-    args = message.text.replace(CMD_LEADERBOARD_TIMER_SET, "").strip()
+    args = strip_command(message.text, CMD_LEADERBOARD_TIMER_SET)
     match = re.match(r"^(\d{1,2})-(\d{1,2})-(\d{1,2})$", args)
     if not match:
         await send_reply(message, f"❌ Неверный формат! Используй: `{CMD_LEADERBOARD_TIMER_SET} 05-18-30` (МСК)")
@@ -1152,7 +1194,7 @@ async def set_leaderboard_timer(message: Message):
         await db.commit()
     await send_reply(message, f"✅ Таймер лидерборда установлен: `{day:02d}-{hour:02d}-{minute:02d}` (МСК)")
 
-@bot.on.message(text=CMD_LEADERBOARD_TIMER_RESET)
+@bot.on.message(EqualsRule(CMD_LEADERBOARD_TIMER_RESET))
 async def reset_leaderboard_timer(message: Message):
     if not is_message_allowed(message):
         return
@@ -1169,7 +1211,7 @@ async def mention_reply_handler(message: Message):
         return
     if not message.text:
         return
-    if message.text.startswith("/"):
+    if (message.text or "").lstrip().startswith("/"):
         return
     reply_from_id = extract_reply_from_id(message)
     is_reply_to_bot = BOT_GROUP_ID and reply_from_id == -BOT_GROUP_ID
@@ -1184,7 +1226,7 @@ async def mention_reply_handler(message: Message):
     if not cleaned:
         await send_reply(message, "Напиши сообщение после упоминания.")
         return
-    if cleaned.startswith("/"):
+    if cleaned.lstrip().startswith("/"):
         return
     try:
         cleaned_for_llm = trim_chat_text(cleaned)
@@ -1258,4 +1300,5 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     bot.loop_wrapper.on_startup.append(start_background_tasks())
     bot.run_forever()
+
 

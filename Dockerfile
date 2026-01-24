@@ -18,4 +18,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Запуск
-CMD ["python", "gayBot.py"]
+CMD ["python", "bot.py"]
